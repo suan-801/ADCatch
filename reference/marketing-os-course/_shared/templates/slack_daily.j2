@@ -1,0 +1,32 @@
+{# 데일리 슬랙 리포트 — Meta Ads 어제 데이터  #}
+*📊 {{ brand|upper }} 데일리 광고 리포트 — {{ date }}* ({{ tier }})
+
+*어제 KPI*
+• 지출 *{{ fmt_won(total.spend) }}*  {{ pct_arrow(total.spend, prev_total.spend) }} vs 전일 · {{ pct_arrow_avg(total.spend, week_avg_spend) }} vs 7일평균
+• 노출 {{ fmt_num(total.impressions) }} · 클릭 {{ fmt_num(total.clicks) }} · CTR *{{ "%.2f"|format(total.ctr) }}%* · CPC {{ fmt_won(total.cpc) }}
+• 구매 *{{ "%.0f"|format(total.purchases) }}건* · 매출 *{{ fmt_won(total.purchase_value) }}* · ROAS *{{ "%.2f"|format(total.roas) }}* {{ light_roas }}
+• CPA {{ fmt_won(total.cpa) }} {{ light_cpa }}
+{% if top_campaigns %}
+
+*🏆 캠페인 TOP {{ top_campaigns|length }}* (지출순)
+{% for c in top_campaigns %}{{ loop.index }}. `{{ c.campaign_name|truncate(28, True) }}` — 지출 {{ fmt_won(c.spend) }} · ROAS {{ "%.2f"|format(c.roas) }} {{ light_for_roas(c.roas) }} · 구매 {{ "%.0f"|format(c.purchases) }}
+{% endfor %}{% endif %}{% if top_ads %}
+
+*✨ 고성과 소재 TOP {{ top_ads|length }}* (구매≥1, 지출≥{{ fmt_won(thresholds.spend_min) }})
+{% for a in top_ads %}{{ loop.index }}. `{{ a.ad_name|truncate(32, True) }}` — ROAS *{{ "%.2f"|format(a.roas) }}* · 지출 {{ fmt_won(a.spend) }} · 구매 {{ "%.0f"|format(a.purchases) }} · 매출 {{ fmt_won(a.purchase_value) }}
+{% endfor %}{% endif %}{% if bottom_ads %}
+
+*⚠️ 저성과 소재* (구매=0 또는 ROAS < {{ thresholds.roas_red }}, 지출≥{{ fmt_won(thresholds.spend_min) }})
+{% for a in bottom_ads %}{{ loop.index }}. `{{ a.ad_name|truncate(32, True) }}` — ROAS {{ "%.2f"|format(a.roas) }} · 지출 {{ fmt_won(a.spend) }} · 구매 {{ "%.0f"|format(a.purchases) }}
+{% endfor %}{% endif %}{% if alerts %}
+
+*🚨 가드레일 알림*
+{% for msg in alerts %}• {{ msg }}
+{% endfor %}{% endif %}{% if ga4_block %}
+
+*🌐 GA4 utm 유입 (paid_social — 트래픽 검증용)*
+{{ ga4_block }}
+{% endif %}
+─────────────────
+_ROAS·매출은 Meta Ads Manager 어트리뷰션(7d-click + 1d-view) 기준. GA4 는 utm 유입·트래픽 분석용._
+_freshness: {{ tier }} (t1=preview, t2=stable, t7+=meta_final)_

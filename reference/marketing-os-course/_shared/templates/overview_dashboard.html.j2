@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>{{ brand|upper }} Overview — {{ target }}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0; font-family: -apple-system, "Pretendard", "Inter", sans-serif; background: #f7f5f2; color: #1a1410; line-height: 1.6; }
+
+  /* ─── 상단 글로벌 nav ─── */
+  .topbar { background: #15171a; color: #e5e7eb; height: 56px; font-size: 13px; }
+  .topbar-inner { max-width: 1280px; margin: 0 auto; padding: 0 28px; height: 100%; display: flex; align-items: center; gap: 18px; }
+  .topbar .brand { font-weight: 700; font-size: 15px; letter-spacing: .02em; color: #fff; }
+  .topbar .nav-tab { padding: 6px 14px; border-radius: 6px; font-weight: 500; color: #9ca3af; cursor: pointer; text-decoration: none; transition: background .12s, color .12s; }
+  .topbar .nav-tab:hover { background: rgba(255,255,255,0.06); color: #d1d5db; }
+  .topbar .nav-tab.active { background: rgba(217,119,87,0.18); color: #fff; }
+  .topbar .spacer { flex: 1; }
+
+  /* ─── 섹션 nav ─── */
+  .section-nav { background: #fff; border-bottom: 1px solid #ece6dd; position: sticky; top: 0; z-index: 90; box-shadow: 0 1px 3px rgba(0,0,0,0.03); }
+  .section-nav-inner { max-width: 1280px; margin: 0 auto; padding: 0 28px; display: flex; gap: 4px; overflow-x: auto; }
+  .section-nav a { padding: 12px 14px; font-size: 13px; font-weight: 600; color: #6b7280; text-decoration: none; border-bottom: 3px solid transparent; transition: color .15s, border-color .15s; white-space: nowrap; }
+  .section-nav a:hover { color: #1a1410; }
+  .section-nav a.active { color: #d97757; border-bottom-color: #d97757; }
+
+  .page { max-width: 1280px; margin: 0 auto; padding: 28px 28px 60px; }
+
+  /* ─── 헤더 인사말 ─── */
+  .greeting { background: linear-gradient(135deg, #fdf6f0 0%, #fdecdf 100%); border-radius: 20px; padding: 28px 32px; margin-bottom: 22px; border: 1px solid #f3dfc8; }
+  .greeting h1 { margin: 0 0 6px 0; font-size: 28px; font-weight: 800; letter-spacing: -0.02em; color: #1a1410; }
+  .greeting .sub { color: #6b5520; font-size: 14px; }
+
+  /* ─── 섹션 공통 ─── */
+  section { scroll-margin-top: 72px; margin-bottom: 36px; animation: fadeUp .4s ease-out both; }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .sec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #1a1410; }
+  .sec-head h2 { font-size: 19px; font-weight: 800; margin: 0; letter-spacing: -0.01em; }
+  .sec-head .sec-num { color: #d97757; font-weight: 800; font-size: 19px; }
+  .sec-head .sec-hint { color: #6b7280; font-size: 12px; margin-left: auto; }
+
+  /* ─── 카드 공통 ─── */
+  .card { background: #fff; border: 1px solid #ece6dd; border-radius: 16px; padding: 22px; margin-bottom: 14px; box-shadow: 0 1px 3px rgba(26,20,16,0.03); }
+
+  /* ─── §1 KPI 카드 — 6칸 ─── */
+  .kpi-story-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; margin-bottom: 20px; }
+  .kpi-story { background: #fff; border: 1px solid #ece6dd; border-radius: 14px; padding: 16px 14px 12px; transition: transform .15s, box-shadow .15s; }
+  .kpi-story:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(26,20,16,0.07); }
+  .kpi-story .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .kpi-story .emoji { font-size: 20px; }
+  .kpi-story .label { font-size: 10px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .kpi-story .value { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.15; color: #1a1410; }
+  .kpi-story .delta { font-size: 11px; align-self: flex-start; padding: 3px 8px; border-radius: 12px; display: inline-block; margin-top: 6px; }
+  .delta.up { background: #e9f7ec; color: #2f7a2f; }
+  .delta.down { background: #fdecec; color: #b04444; }
+  .delta.flat { background: #f3f4f6; color: #6b7280; }
+  /* "지출"과 "CPM" 은 ↑ 일수록 부정 → 색상 반전 */
+  .kpi-story.spend .delta.up { background: #fdecec; color: #b04444; }
+  .kpi-story.spend .delta.down { background: #e9f7ec; color: #2f7a2f; }
+  .kpi-story .story { margin-top: 8px; font-size: 11px; color: #4b5563; line-height: 1.5; }
+  .kpi-story .spark-wrap { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #ece6dd; height: 32px; }
+  .kpi-story .spark { width: 100%; height: 100%; display: block; }
+
+  /* ─── §1 통합 인사이트 박스 ─── */
+  .insight-band { background: linear-gradient(135deg, #fdf6f0 0%, #fdecdf 100%); padding: 14px 18px; border-radius: 12px; border-left: 4px solid #d97757; font-size: 13px; line-height: 1.7; }
+  .insight-band strong { color: #8a4d2a; font-weight: 700; }
+
+  /* ─── §2 월간 평균 ─── */
+  .monthly-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .monthly-card { background: #fff; border: 1px solid #ece6dd; border-radius: 14px; padding: 18px 20px; }
+  .monthly-card .mc-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 10px; }
+  .monthly-card .mc-title { font-size: 13px; font-weight: 700; color: #1a1410; }
+  .monthly-card .mc-light { font-size: 16px; }
+  .monthly-card .mc-value { font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; color: #1a1410; line-height: 1.15; }
+  .monthly-card .mc-hint { margin-top: 8px; font-size: 11px; color: #6b7280; line-height: 1.5; }
+
+  /* ─── 통합 기간 선택기 ─── */
+  .range-picker { display: inline-flex; align-items: center; gap: 10px; background: #fff; padding: 8px 14px; border-radius: 999px; border: 1px solid #f0dba6; margin-top: 12px; flex-wrap: wrap; }
+  .range-picker .lbl { font-size: 12px; color: #6b7280; font-weight: 600; }
+  .range-picker input[type="date"] { border: 1px solid #ece6dd; background: #fff; padding: 6px 10px; border-radius: 8px; font-size: 13px; font-weight: 600; color: #1a1410; font-family: inherit; cursor: pointer; }
+  .range-picker input[type="date"]:focus { outline: 2px solid #d97757; outline-offset: 0; border-color: #d97757; }
+  .range-picker .chip-divider { width: 1px; height: 20px; background: #ece6dd; margin: 0 4px; }
+  .range-picker .chip { background: #fff; border: 1px solid #ece6dd; padding: 7px 16px; font-size: 13px; font-weight: 600; color: #4b5563; border-radius: 999px; cursor: pointer; transition: background .12s, color .12s, border-color .12s; font-family: inherit; }
+  .range-picker .chip:hover { border-color: #d97757; color: #1a1410; }
+  .range-picker .chip.active { background: #1a1410; color: #fff; border-color: #1a1410; }
+
+  /* ─── §3 채널+캠페인 단일 테이블 ─── */
+  .channel-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .channel-table th { text-align: left; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; padding: 10px 12px; border-bottom: 1px solid #ece6dd; }
+  .channel-table td { padding: 10px 12px; border-bottom: 1px solid #f5f0e8; font-variant-numeric: tabular-nums; vertical-align: middle; }
+  .channel-table td.name { font-weight: 600; color: #1a1410; }
+  .channel-table td.num { text-align: right; color: #4b5563; }
+  .channel-table td.pct { text-align: right; font-weight: 700; color: #d97757; }
+  .channel-table tr:hover td { background: #faf7f2; }
+  .channel-row-tag { display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; color: #fff; }
+  .channel-row-cmp { font-size: 12px; color: #4b5563; margin-top: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; word-break: break-all; }
+  .channel-bar { height: 4px; background: #f3ede4; border-radius: 2px; overflow: hidden; margin-top: 6px; }
+  .channel-bar-fill { height: 100%; background: linear-gradient(90deg, #d97757 0%, #c8a464 100%); }
+
+  /* ─── §4 메타 4단 퍼널 + CVR ─── */
+  .meta-funnel { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .funnel-stage { background: #faf7f2; border-radius: 12px; padding: 16px 14px; border-left: 3px solid #d97757; position: relative; }
+  .funnel-stage .fs-emoji { font-size: 24px; line-height: 1; }
+  .funnel-stage .fs-label { font-size: 12px; color: #6b7280; margin-top: 6px; font-weight: 700; }
+  .funnel-stage .fs-value { font-size: 22px; font-weight: 800; color: #1a1410; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .funnel-stage .fs-cvr { font-size: 11px; color: #8a4d2a; margin-top: 6px; font-weight: 700; background: #fdf6f0; padding: 3px 8px; border-radius: 999px; display: inline-block; }
+  .funnel-stage .fs-cvr-label { font-size: 10px; color: #6b7280; font-weight: 600; }
+  .funnel-explain { margin-top: 14px; padding: 14px 18px; background: #fdf6f0; border-radius: 10px; border-left: 3px solid #d97757; font-size: 13px; color: #4b5563; line-height: 1.7; }
+  .funnel-explain strong { color: #8a4d2a; font-weight: 700; }
+
+  /* ─── §5 광고 소재 Top 3 ─── */
+  .creative-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .creative-card { background: #fff; border: 1px solid #ece6dd; border-radius: 16px; padding: 14px; transition: transform .15s, box-shadow .15s; }
+  .creative-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(26,20,16,0.07); }
+  .creative-card .medal { font-size: 24px; line-height: 1; margin-bottom: 6px; }
+  .creative-card .thumb { width: 100%; aspect-ratio: 1; background: #f3ede4; border-radius: 10px; overflow: hidden; margin-bottom: 10px; position: relative; }
+  .creative-card .thumb img, .creative-card .thumb video { width: 100%; height: 100%; object-fit: cover; }
+  .creative-card .thumb .placeholder { display: flex; align-items: center; justify-content: center; height: 100%; color: #9ca3af; font-size: 12px; }
+  .creative-card .ad-name { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #6b7280; margin-bottom: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .creative-card .roas-big { font-size: 22px; font-weight: 800; color: #2f7a2f; line-height: 1; margin-bottom: 4px; }
+  .creative-card .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px 12px; font-size: 11px; }
+  .creative-card .metrics .m-label { color: #6b7280; }
+  .creative-card .metrics .m-value { font-weight: 700; color: #1a1410; font-variant-numeric: tabular-nums; text-align: right; }
+  .creative-empty { padding: 30px; text-align: center; color: #9ca3af; font-size: 13px; background: #faf7f2; border-radius: 12px; }
+
+  /* ─── 푸터 ─── */
+  .footer { margin-top: 36px; padding: 18px 22px; background: #fff; border: 1px solid #ece6dd; border-radius: 12px; font-size: 11px; color: #6b7280; line-height: 1.7; }
+  .footer code { background: #f3ede4; padding: 1px 6px; border-radius: 4px; font-size: 10px; color: #8a4d2a; }
+
+  @media (max-width: 1100px) {
+    .kpi-story-grid { grid-template-columns: repeat(3, 1fr); }
+    .monthly-grid { grid-template-columns: repeat(2, 1fr); }
+    .meta-funnel { grid-template-columns: repeat(2, 1fr); }
+    .creative-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">{{ brand|upper }}</div>
+    <a href="overview_{{ target }}.html" class="nav-tab active">Overview</a>
+    <a href="ga4_dashboard_{{ target }}.html" class="nav-tab">GA4</a>
+    <a href="meta_dashboard_{{ target }}.html" class="nav-tab">Meta</a>
+    <div class="spacer"></div>
+  </div>
+</div>
+
+<nav class="section-nav">
+  <div class="section-nav-inner">
+    <a href="#summary" class="active">1. 어제 ☕</a>
+    <a href="#monthly">2. 이번 달 평균 🎯</a>
+    <a href="#channel">3. 어디서 오셨나 🚪</a>
+    <a href="#funnel">4. 와서 뭘 했나 🛒</a>
+    <a href="#creatives">5. 베스트 광고 🏆</a>
+  </div>
+</nav>
+
+<div class="page">
+
+  <!-- ─── 헤더 인사말 ─── -->
+  <div class="greeting">
+    <h1>안녕하세요 ☀️ <span data-period-head>어제 이런 일이 있었어요</span></h1>
+    <div class="sub">{{ brand|upper }} 마케팅 한눈에 보기</div>
+    <div class="range-picker" aria-label="기간 선택">
+      <span class="lbl">시작</span>
+      <input type="date" id="date-start" min="{{ date_min }}" max="{{ date_max }}" value="{{ target }}">
+      <span class="lbl">종료</span>
+      <input type="date" id="date-end" min="{{ date_min }}" max="{{ date_max }}" value="{{ target }}">
+      <span class="chip-divider"></span>
+      <button type="button" class="chip active" data-preset="1">어제</button>
+      <button type="button" class="chip" data-preset="7">7일</button>
+      <button type="button" class="chip" data-preset="14">14일</button>
+      <button type="button" class="chip" data-preset="30">30일</button>
+    </div>
+  </div>
+
+  <!-- ============================================================== -->
+  <!-- §1 어제 이렇게 됐어요 ☕ -->
+  <!-- ============================================================== -->
+  <section id="summary">
+    <div class="sec-head">
+      <h2><span class="sec-num">1.</span> <span data-period-summary-head>어제 이렇게 됐어요 ☕</span></h2>
+      <span class="sec-hint">6가지 핵심 숫자 + 직전 동기간 변화</span>
+    </div>
+
+    {% set k = kpi_summary %}
+    <div class="kpi-story-grid">
+      {% for slot in ['spend', 'visitors', 'sessions', 'atc', 'purchases', 'roas'] %}
+      {% set kk = k.get(slot) %}
+      {% if kk %}
+      <div class="kpi-story {{ slot }}" data-kpi-card="{{ slot }}">
+        <div class="head">
+          <span class="emoji">{{ kk.emoji }}</span>
+          <span class="label">{{ kk.label }}</span>
+        </div>
+        <div class="value" data-kpi-value>
+          {% if slot == 'roas' %}{{ '%.2f'|format(kk.value) }}
+          {% elif slot == 'spend' %}{{ '{:,}'.format(kk.value) }}원
+          {% else %}{{ '{:,}'.format(kk.value) }}
+          {% endif %}
+        </div>
+        <span class="delta {{ kk.delta.direction }}" data-kpi-delta>
+          {% if kk.delta.direction == 'up' %}↑{% elif kk.delta.direction == 'down' %}↓{% else %}—{% endif %}
+          {{ '%+.1f'|format(kk.delta.pct) }}%
+        </span>
+        <div class="story" data-kpi-story>{{ kk.story }}</div>
+        <div class="spark-wrap">
+          <canvas class="spark" id="spark_{{ slot }}" data-spark="{{ kk.spark|tojson|e }}"></canvas>
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+
+    <div class="insight-band" data-period-insight>
+      {% if k.sessions and k.spend and k.purchases %}
+      ☕ 어제 <strong>{{ '{:,}'.format(k.visitors.value) }}명</strong>이 방문해서
+      <strong>{{ '{:,}'.format(k.sessions.value) }}회</strong> 둘러봤고,
+      광고에 <strong>{{ '{:,}'.format(k.spend.value) }}원</strong> 써서
+      장바구니 <strong>{{ '{:,}'.format(k.atc.value) }}건</strong>,
+      구매 <strong>{{ '{:,}'.format(k.purchases.value) }}건</strong> (ROAS <strong>{{ '%.2f'|format(k.roas.value) }}</strong>)
+      {% endif %}
+    </div>
+  </section>
+
+  <!-- ============================================================== -->
+  <!-- §2 월간 목표 잘 진행되고 있나요 🎯 -->
+  <!-- ============================================================== -->
+  <section id="monthly">
+    <div class="sec-head">
+      <h2><span class="sec-num">2.</span> 월간 목표 잘 진행되고 있나요 🎯</h2>
+      <span class="sec-hint">{{ achievement.month_start }} ~ {{ target }} (메타 광고 {{ achievement.days_into_month }}/{{ achievement.days_in_month }}일차 평균)</span>
+    </div>
+
+    <div class="monthly-grid">
+      {% for item in achievement.get('items') %}
+      <div class="monthly-card">
+        <div class="mc-head">
+          <div class="mc-title">{{ item.emoji }} {{ item.label }}</div>
+          <div class="mc-light">{{ item.light }}</div>
+        </div>
+        <div class="mc-value">{{ item.value_str }}</div>
+        <div class="mc-hint">{{ item.hint }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+
+  <!-- ============================================================== -->
+  <!-- §3 어디서 오셨나요 🚪 — 채널+캠페인 단일 테이블 -->
+  <!-- ============================================================== -->
+  <section id="channel">
+    <div class="sec-head">
+      <h2><span class="sec-num">3.</span> 어디서 오셨나요 🚪</h2>
+      <span class="sec-hint" data-period-channel-hint>어제 GA4 채널·캠페인별 유입 TOP</span>
+    </div>
+
+    <div class="card">
+      <table class="channel-table">
+        <thead>
+          <tr>
+            <th>채널 / 캠페인</th>
+            <th style="text-align:right;">세션</th>
+            <th style="text-align:right;">전환</th>
+            <th style="text-align:right;">매출</th>
+            <th style="text-align:right;width:100px;">비중</th>
+          </tr>
+        </thead>
+        <tbody data-channel-body>
+          <!-- JS 가 채움 -->
+        </tbody>
+      </table>
+      <div class="insight-band" style="margin-top: 14px;" data-channel-insight></div>
+    </div>
+  </section>
+
+  <!-- ============================================================== -->
+  <!-- §4 와서 뭘 하셨나요 🛒 — 메타 4단 퍼널 + CVR -->
+  <!-- ============================================================== -->
+  <section id="funnel">
+    <div class="sec-head">
+      <h2><span class="sec-num">4.</span> 와서 뭘 하셨나요 🛒</h2>
+      <span class="sec-hint">메타 광고: 노출 → 클릭 → 장바구니+결제시작 → 구매</span>
+    </div>
+
+    <div class="card">
+      <div class="meta-funnel" data-funnel-meta>
+        <div class="funnel-stage">
+          <div class="fs-emoji">👁️</div>
+          <div class="fs-label">노출</div>
+          <div class="fs-value" data-stage="impressions">0</div>
+          <div class="fs-cvr-label">시작 단계</div>
+        </div>
+        <div class="funnel-stage">
+          <div class="fs-emoji">👆</div>
+          <div class="fs-label">클릭</div>
+          <div class="fs-value" data-stage="clicks">0</div>
+          <div class="fs-cvr" data-cvr="ctr">CTR 0%</div>
+        </div>
+        <div class="funnel-stage">
+          <div class="fs-emoji">🛍️</div>
+          <div class="fs-label">장바구니+결제시작</div>
+          <div class="fs-value" data-stage="atc_co">0</div>
+          <div class="fs-cvr" data-cvr="atc_cvr">결제시도 CVR 0%</div>
+        </div>
+        <div class="funnel-stage">
+          <div class="fs-emoji">🎉</div>
+          <div class="fs-label">구매</div>
+          <div class="fs-value" data-stage="purchases">0</div>
+          <div class="fs-cvr" data-cvr="pur_cvr">구매전환 CVR 0%</div>
+        </div>
+      </div>
+      <div class="funnel-explain" data-funnel-explain>
+        <!-- JS 가 채움 -->
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================== -->
+  <!-- §5 베스트 광고 🏆 -->
+  <!-- ============================================================== -->
+  <section id="creatives">
+    <div class="sec-head">
+      <h2><span class="sec-num">5.</span> 베스트 광고 🏆</h2>
+      <span class="sec-hint" data-period-best-hint>어제 ROAS 상위 3개 광고 (지출 1만원 이상)</span>
+    </div>
+
+    {% if creatives_top3 %}
+    <div class="creative-grid">
+      {% for c in creatives_top3 %}
+      <div class="creative-card">
+        <div class="medal">{{ c.medal }}</div>
+        <div class="thumb">
+          {% if c.thumb %}
+            {% if c.is_video %}
+              <div class="placeholder">🎬 동영상 광고</div>
+            {% else %}
+              <img src="{{ c.thumb }}" alt="{{ c.ad_name }}" loading="lazy">
+            {% endif %}
+          {% else %}
+            <div class="placeholder">미리보기 없음</div>
+          {% endif %}
+        </div>
+        <div class="roas-big">ROAS {{ '%.2f'|format(c.roas) }}</div>
+        <div class="ad-name">{{ c.ad_name }}</div>
+        <div class="metrics">
+          <span class="m-label">지출</span><span class="m-value">{{ '{:,}'.format(c.spend) }}원</span>
+          <span class="m-label">CPM</span><span class="m-value">{{ '{:,}'.format(c.cpm) }}원</span>
+          <span class="m-label">클릭</span><span class="m-value">{{ '{:,}'.format(c.clicks) }}</span>
+          <span class="m-label">랜딩페이지조회</span><span class="m-value">{{ '{:,}'.format(c.landing_views) }}</span>
+          <span class="m-label">CTR</span><span class="m-value">{{ '%.2f'|format(c.ctr) }}%</span>
+          <span class="m-label">구매</span><span class="m-value">{{ c.purchases }}건</span>
+          <span class="m-label">ROAS</span><span class="m-value">{{ '%.2f'|format(c.roas) }}</span>
+          <span class="m-label">CPA</span><span class="m-value">{{ '{:,}'.format(c.cpa) }}원</span>
+          <span class="m-label">AOV</span><span class="m-value">{{ '{:,}'.format(c.aov) }}원</span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="creative-empty">아직 이 기간에 ROAS 상위 광고가 없어요. 지출이 적거나 아직 데이터가 쌓이지 않은 것 같아요 ⏳</div>
+    {% endif %}
+  </section>
+
+  <!-- ─── 푸터 ─── -->
+  <div class="footer">
+    📌 ROAS·매출·CTR·CPM·AOV 등 모든 광고 메트릭은 Meta Ads Manager 가 진실값 — GA4 는 자사몰 유입·트래픽 분해 (역할 분리).
+    구매 카운트는 자사몰 기본 결제 + 네이버페이 결제를 합산합니다. 어제 데이터는 플랫폼 보정 전 미리보기로, 1~2일 후 최종값으로 자동 반영됩니다.
+  </div>
+
+</div>
+
+<script id="DAILY_DATA" type="application/json">{{ daily_data_json|safe }}</script>
+<script>
+// ───────────────────────────────────────────────────────────
+// 일자별 raw 데이터 → 임의 윈도우 클라이언트 사이드 집계
+// ───────────────────────────────────────────────────────────
+const DAILY_DATA = (() => {
+  try { return JSON.parse(document.getElementById('DAILY_DATA').textContent); }
+  catch (e) { return {}; }
+})();
+const AVAILABLE_DATES = Object.keys(DAILY_DATA).sort();
+let currentRange = { start: null, end: null };
+
+const fmtNum = n => Math.round(Number(n) || 0).toLocaleString('ko-KR');
+const fmtWon = n => fmtNum(n) + '원';
+const fmtRoas = n => (Number(n) || 0).toFixed(2);
+const fmtPct = n => (Number(n) || 0).toFixed(2) + '%';
+
+function shiftDate(iso, days) {
+  // UTC 로 파싱·연산해야 timezone offset 으로 인한 day-shift 가 안 생김
+  const d = new Date(iso + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function datesInRange(startISO, endISO) {
+  const out = [];
+  let cur = startISO;
+  while (cur <= endISO) {
+    out.push(cur);
+    cur = shiftDate(cur, 1);
+  }
+  return out;
+}
+
+function aggregateWindow(startISO, endISO) {
+  const dates = datesInRange(startISO, endISO);
+  const slice = dates.map(d => DAILY_DATA[d]).filter(Boolean);
+
+  const sumKey = (rows, group, key) => rows.reduce((acc, r) => acc + ((r[group] || {})[key] || 0), 0);
+  const sessions = sumKey(slice, 'ga4', 'sessions');
+  const new_users = sumKey(slice, 'ga4', 'new_users');
+  const returning = sumKey(slice, 'ga4', 'returning_users');
+  const visitors = new_users + returning;
+  const spend = sumKey(slice, 'meta', 'spend');
+  const revenue = sumKey(slice, 'meta', 'purchase_value');
+  const purchases = sumKey(slice, 'meta', 'purchases');
+  const impressions = sumKey(slice, 'meta', 'impressions');
+  const clicks = sumKey(slice, 'meta', 'clicks');
+  const atc = sumKey(slice, 'meta', 'add_to_carts');
+  const checkouts = sumKey(slice, 'meta', 'checkouts');
+  const atc_co = atc + checkouts;
+  const roas = spend ? revenue / spend : 0;
+  const ctr = impressions ? clicks / impressions * 100 : 0;
+  const atc_cvr = clicks ? atc_co / clicks * 100 : 0;
+  const pur_cvr = clicks ? purchases / clicks * 100 : 0;
+  const cpm = impressions ? spend / impressions * 1000 : 0;
+  const aov = purchases ? revenue / purchases : 0;
+
+  // 직전 동기간 비교
+  const days = dates.length;
+  const prevEnd = shiftDate(startISO, -1);
+  const prevStart = shiftDate(prevEnd, -(days - 1));
+  const prevSlice = datesInRange(prevStart, prevEnd).map(d => DAILY_DATA[d]).filter(Boolean);
+  const pSpend = sumKey(prevSlice, 'meta', 'spend');
+  const pVisitors = sumKey(prevSlice, 'ga4', 'new_users') + sumKey(prevSlice, 'ga4', 'returning_users');
+  const pSessions = sumKey(prevSlice, 'ga4', 'sessions');
+  const pAtc = sumKey(prevSlice, 'meta', 'add_to_carts');
+  const pPurchases = sumKey(prevSlice, 'meta', 'purchases');
+  const pRevenue = sumKey(prevSlice, 'meta', 'purchase_value');
+  const pRoas = pSpend ? pRevenue / pSpend : 0;
+  const pct = (curr, prev) => {
+    if (!prev) return { pct: 0, direction: 'flat' };
+    const v = (curr - prev) / Math.abs(prev) * 100;
+    return { pct: Number(v.toFixed(1)), direction: v > 1 ? 'up' : (v < -1 ? 'down' : 'flat') };
+  };
+
+  // sparkline
+  const spark = (group, key) => slice.map(r => (r[group] || {})[key] || 0);
+  const sparkVisitors = slice.map(r => ((r.ga4 || {}).new_users || 0) + ((r.ga4 || {}).returning_users || 0));
+
+  // 채널+캠페인 합본 집계 (슬라이스 윈도우 합)
+  const chBucket = {};
+  for (const r of slice) {
+    for (const ch of r.channels || []) {
+      const cg = ch.channel_group || 'Other';
+      const cmp = (ch.campaign || '(none)').trim() || '(none)';
+      const k = cg + '||' + cmp;
+      if (!chBucket[k]) chBucket[k] = { channel: cg, campaign: cmp, sessions: 0, conversions: 0, revenue: 0 };
+      chBucket[k].sessions += ch.sessions || 0;
+      chBucket[k].conversions += ch.conversions || 0;
+      chBucket[k].revenue += ch.revenue || 0;
+    }
+  }
+  const chTotal = Object.values(chBucket).reduce((s, b) => s + b.sessions, 0) || 1;
+  const channelRows = Object.values(chBucket)
+    .sort((a, b) => b.sessions - a.sessions)
+    .slice(0, 12)
+    .map(v => ({ ...v, pct: Math.round(v.sessions / chTotal * 1000) / 10 }));
+
+  // story
+  const moneyStory = (n, verb) => {
+    if (!n) return '—';
+    if (n >= 10000) return (n / 10000).toFixed(1) + '만원 ' + verb;
+    return fmtNum(n) + '원 ' + verb;
+  };
+  const roasStory = r => {
+    if (!r) return '데이터 없음';
+    if (r >= 3) return `ROAS ${r.toFixed(2)} — 잘 벌고 있어요 🎉`;
+    if (r >= 2) return `ROAS ${r.toFixed(2)} — 안정적이에요`;
+    if (r >= 1) return `ROAS ${r.toFixed(2)} — 본전 근처`;
+    return `ROAS ${r.toFixed(2)} — 손해 중`;
+  };
+
+  return {
+    days,
+    kpi: {
+      spend: { value: Math.round(spend), delta: pct(spend, pSpend), spark: spark('meta', 'spend'),
+               story: moneyStory(spend, '썼어요') },
+      visitors: { value: Math.round(visitors), delta: pct(visitors, pVisitors), spark: sparkVisitors,
+                  story: visitors ? `신규 ${fmtNum(new_users)}명 · 재방문 ${fmtNum(returning)}명` : '방문자 데이터가 없어요' },
+      sessions: { value: Math.round(sessions), delta: pct(sessions, pSessions), spark: spark('ga4', 'sessions'),
+                  story: sessions ? `${fmtNum(sessions)}회 둘러봤어요` : '방문이 없었어요' },
+      atc: { value: Math.round(atc), delta: pct(atc, pAtc), spark: spark('meta', 'add_to_carts'),
+             story: atc ? `${fmtNum(atc)}건 담겼어요` : '—' },
+      purchases: { value: Math.round(purchases), delta: pct(purchases, pPurchases), spark: spark('meta', 'purchases'),
+                   story: purchases ? `${fmtNum(purchases)}건 결제됐어요` : '—' },
+      roas: { value: Number(roas.toFixed(2)), delta: pct(roas, pRoas), spark: spark('meta', 'roas'),
+              story: roasStory(roas) },
+    },
+    funnel: {
+      impressions, clicks, atc_co, purchases,
+      ctr, atc_cvr, pur_cvr, cpm, aov,
+      revenue, spend,
+    },
+    channelRows,
+  };
+}
+
+function periodLabel(startISO, endISO) {
+  const days = datesInRange(startISO, endISO).length;
+  if (days === 1) return '어제';
+  return `최근 ${days}일`;
+}
+
+function applyRange(startISO, endISO) {
+  if (startISO > endISO) [startISO, endISO] = [endISO, startISO];
+  currentRange = { start: startISO, end: endISO };
+  document.getElementById('date-start').value = startISO;
+  document.getElementById('date-end').value = endISO;
+
+  const days = datesInRange(startISO, endISO).length;
+  const label = periodLabel(startISO, endISO);
+  document.querySelectorAll('[data-period-head]').forEach(el => el.textContent = `${label} 이런 일이 있었어요`);
+  document.querySelectorAll('[data-period-summary-head]').forEach(el => el.textContent = `${label} 이렇게 됐어요 ☕`);
+  document.querySelectorAll('[data-period-channel-hint]').forEach(el => el.textContent = `${label} GA4 채널·캠페인별 유입 TOP`);
+  document.querySelectorAll('[data-period-best-hint]').forEach(el => el.textContent = `${label} ROAS 상위 3개 광고 (지출 1만원 이상)`);
+
+  const agg = aggregateWindow(startISO, endISO);
+
+  // §1 KPI 카드 (6개)
+  for (const slot of ['spend', 'visitors', 'sessions', 'atc', 'purchases', 'roas']) {
+    const card = document.querySelector(`[data-kpi-card="${slot}"]`);
+    if (!card) continue;
+    const kk = agg.kpi[slot];
+    const valEl = card.querySelector('[data-kpi-value]');
+    const dEl = card.querySelector('[data-kpi-delta]');
+    const sEl = card.querySelector('[data-kpi-story]');
+    if (valEl) {
+      if (slot === 'roas') valEl.textContent = fmtRoas(kk.value);
+      else if (slot === 'spend') valEl.textContent = fmtWon(kk.value);
+      else valEl.textContent = fmtNum(kk.value);
+    }
+    if (dEl) {
+      const dir = kk.delta.direction;
+      const arrow = dir === 'up' ? '↑' : (dir === 'down' ? '↓' : '—');
+      const sign = (kk.delta.pct >= 0 ? '+' : '') + Number(kk.delta.pct).toFixed(1);
+      dEl.textContent = `${arrow} ${sign}%`;
+      dEl.className = 'delta ' + dir;
+    }
+    if (sEl) sEl.textContent = kk.story;
+    const spark = card.querySelector('canvas.spark');
+    if (spark && kk.spark && kk.spark.length >= 2) {
+      drawSpark(spark, kk.spark, SPARK_COLORS[slot] || '#6b7280');
+    }
+  }
+
+  // §1 인사이트 밴드
+  const insight = document.querySelector('[data-period-insight]');
+  if (insight) {
+    const k = agg.kpi;
+    if (k.sessions.value || k.spend.value || k.purchases.value) {
+      const lead = days === 1 ? '☕ 어제' : `☕ 최근 ${days}일 동안`;
+      insight.innerHTML = `${lead} <strong>${fmtNum(k.visitors.value)}명</strong>이 방문해서 ` +
+        `<strong>${fmtNum(k.sessions.value)}회</strong> 둘러봤고, ` +
+        `광고에 <strong>${fmtWon(k.spend.value)}</strong> 써서 ` +
+        `장바구니 <strong>${fmtNum(k.atc.value)}건</strong>, ` +
+        `구매 <strong>${fmtNum(k.purchases.value)}건</strong> ` +
+        `(ROAS <strong>${fmtRoas(k.roas.value)}</strong>)`;
+    } else {
+      insight.innerHTML = '';
+    }
+  }
+
+  // §3 채널+캠페인 테이블
+  renderChannelTable(agg.channelRows);
+
+  // §4 메타 4단 퍼널
+  renderMetaFunnel(agg.funnel);
+
+  // 칩 active 토글
+  document.querySelectorAll('.range-picker .chip').forEach(c => {
+    c.classList.toggle('active', Number(c.dataset.preset) === days);
+  });
+}
+
+function applyPreset(days) {
+  const end = AVAILABLE_DATES[AVAILABLE_DATES.length - 1] || currentRange.end;
+  const start = shiftDate(end, -(days - 1));
+  applyRange(start, end);
+}
+
+const CHANNEL_COLORS = {
+  'Paid Social': '#d97757', 'Organic Search': '#5b3d8a',
+  'Direct': '#1a1410', 'Referral': '#4a8fbe',
+  'Organic Social': '#c8a464', 'Email': '#2f7a2f',
+  'Other': '#9ca3af', 'Unassigned': '#9ca3af',
+};
+
+function renderChannelTable(rows) {
+  const tbody = document.querySelector('[data-channel-body]');
+  const insight = document.querySelector('[data-channel-insight]');
+  if (!tbody) return;
+  if (!rows || !rows.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:#9ca3af;padding:24px;">데이터가 없어요</td></tr>`;
+    if (insight) insight.innerHTML = '';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => {
+    const color = CHANNEL_COLORS[r.channel] || '#9ca3af';
+    return `
+      <tr>
+        <td class="name">
+          <span class="channel-row-tag" style="background:${color};">${escapeHtml(r.channel)}</span>
+          <div class="channel-row-cmp">${escapeHtml(r.campaign)}</div>
+          <div class="channel-bar"><div class="channel-bar-fill" style="width:${r.pct}%;"></div></div>
+        </td>
+        <td class="num">${fmtNum(r.sessions)}</td>
+        <td class="num">${fmtNum(r.conversions)}</td>
+        <td class="num">${r.revenue ? fmtWon(r.revenue) : '—'}</td>
+        <td class="pct">${r.pct}%</td>
+      </tr>
+    `;
+  }).join('');
+  if (insight) {
+    const top = rows[0];
+    insight.innerHTML = `🚪 가장 큰 유입원은 <strong>${escapeHtml(top.channel)}</strong>` +
+      (top.campaign && top.campaign !== '(none)' ? ` · 캠페인 <strong>${escapeHtml(top.campaign)}</strong>` : '') +
+      ` — 전체 ${top.pct}% (${fmtNum(top.sessions)}세션).`;
+  }
+}
+
+function renderMetaFunnel(f) {
+  const root = document.querySelector('[data-funnel-meta]');
+  if (!root) return;
+  root.querySelector('[data-stage="impressions"]').textContent = fmtNum(f.impressions);
+  root.querySelector('[data-stage="clicks"]').textContent = fmtNum(f.clicks);
+  root.querySelector('[data-stage="atc_co"]').textContent = fmtNum(f.atc_co);
+  root.querySelector('[data-stage="purchases"]').textContent = fmtNum(f.purchases);
+  root.querySelector('[data-cvr="ctr"]').textContent = `CTR ${fmtPct(f.ctr)}`;
+  root.querySelector('[data-cvr="atc_cvr"]').textContent = `결제시도 CVR ${fmtPct(f.atc_cvr)}`;
+  root.querySelector('[data-cvr="pur_cvr"]').textContent = `구매전환 CVR ${fmtPct(f.pur_cvr)}`;
+
+  const explain = document.querySelector('[data-funnel-explain]');
+  if (explain) {
+    if (!f.impressions) {
+      explain.innerHTML = '아직 노출 데이터가 쌓이지 않았어요 ⏳';
+    } else {
+      explain.innerHTML =
+        `<strong>노출 ${fmtNum(f.impressions)}건</strong> 중 <strong>${fmtNum(f.clicks)}명</strong>이 클릭해서 ` +
+        `<strong>CTR ${fmtPct(f.ctr)}</strong> 였어요. ` +
+        `클릭한 사람 중 <strong>${fmtNum(f.atc_co)}명</strong>이 장바구니 또는 결제까지 갔으니 ` +
+        `<strong>결제시도 CVR ${fmtPct(f.atc_cvr)}</strong>, ` +
+        `최종 구매까지 간 사람은 <strong>${fmtNum(f.purchases)}명</strong>으로 ` +
+        `<strong>구매전환 CVR ${fmtPct(f.pur_cvr)}</strong> 입니다.`;
+    }
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
+
+// ───────────────────────────────────────────────────────────
+// Sparkline 렌더 — 외부 라이브러리 없이 Canvas 만 사용
+// ───────────────────────────────────────────────────────────
+function drawSpark(canvas, values, color) {
+  if (!canvas || !values || values.length < 2) return;
+  const dpr = window.devicePixelRatio || 1;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width === 0) return;
+  canvas.width = rect.width * dpr;
+  canvas.height = rect.height * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const w = rect.width, h = rect.height;
+  const pad = 4;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = (max - min) || 1;
+
+  const stepX = (w - pad * 2) / (values.length - 1);
+
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, color + '40');
+  grad.addColorStop(1, color + '05');
+
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = pad + i * stepX;
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.lineTo(pad + (values.length - 1) * stepX, h - pad);
+  ctx.lineTo(pad, h - pad);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  ctx.beginPath();
+  values.forEach((v, i) => {
+    const x = pad + i * stepX;
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.8;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  const lastX = pad + (values.length - 1) * stepX;
+  const lastY = h - pad - ((values[values.length - 1] - min) / range) * (h - pad * 2);
+  ctx.beginPath();
+  ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+}
+
+const SPARK_COLORS = {
+  spend: '#c8a464',
+  visitors: '#4a8fbe',
+  sessions: '#5b3d8a',
+  atc: '#c69a4a',
+  purchases: '#2f7a2f',
+  roas: '#d97757',
+};
+
+document.addEventListener('DOMContentLoaded', () => {
+  // KPI sparklines (초기 서버 렌더 직후 그리기)
+  for (const slot of Object.keys(SPARK_COLORS)) {
+    const el = document.getElementById('spark_' + slot);
+    if (!el) continue;
+    try {
+      const values = JSON.parse(el.dataset.spark);
+      drawSpark(el, values, SPARK_COLORS[slot]);
+    } catch (e) {}
+  }
+
+  // 섹션 nav 활성화
+  const navLinks = document.querySelectorAll('.section-nav a');
+  const sections = document.querySelectorAll('section[id]');
+  const onScroll = () => {
+    let current = '';
+    sections.forEach(s => {
+      const rect = s.getBoundingClientRect();
+      if (rect.top < 100) current = s.id;
+    });
+    navLinks.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + current));
+  };
+  document.addEventListener('scroll', onScroll, { passive: true });
+
+  // 기간 선택기
+  const startEl = document.getElementById('date-start');
+  const endEl = document.getElementById('date-end');
+  startEl.addEventListener('change', () => applyRange(startEl.value, endEl.value));
+  endEl.addEventListener('change', () => applyRange(startEl.value, endEl.value));
+  document.querySelectorAll('.range-picker .chip').forEach(btn => {
+    btn.addEventListener('click', () => applyPreset(Number(btn.dataset.preset)));
+  });
+
+  // 초기 상태: 어제(1일) 프리셋
+  applyPreset(1);
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>{{ brand }} GA4 대시보드 — {{ period_start }} ~ {{ period_end }}</title>
+<style>
+  body { font-family: -apple-system, "Pretendard", sans-serif; max-width: 1280px; margin: 32px auto; padding: 0 24px; color: #1a1410; line-height: 1.55; }
+  h1 { font-size: 26px; margin: 0 0 6px; }
+  .sub { color: #6b6056; font-size: 13px; margin-bottom: 18px; }
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; background: #fbf9f6; border: 1px solid #ece6df; border-radius: 8px; padding: 12px 14px; margin-bottom: 22px; }
+  .controls label { font-size: 12px; color: #6b6056; font-weight: 600; }
+  .controls input[type=date] { font-size: 13px; padding: 4px 6px; border: 1px solid #ece6df; border-radius: 4px; font-family: inherit; }
+  .preset { padding: 4px 10px; font-size: 12px; border: 1px solid #ece6df; background: white; border-radius: 14px; cursor: pointer; color: #1a1410; }
+  .preset:hover { background: #d97757; color: white; border-color: #d97757; }
+  .preset.active { background: #d97757; color: white; border-color: #d97757; }
+  .range-info { margin-left: auto; font-size: 12px; color: #8a7e72; }
+  .kpi-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin: 0 0 24px; }
+  .kpi { padding: 12px 14px; border: 1px solid #ece6df; border-radius: 8px; background: #fbf9f6; }
+  .kpi .label { font-size: 11px; color: #8a7e72; text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .value { font-size: 20px; font-weight: 700; margin-top: 4px; font-variant-numeric: tabular-nums; }
+  .kpi .delta { font-size: 11px; margin-top: 4px; }
+  .delta.up { color: #2f7a2f; } .delta.down { color: #b04444; }
+  h2 { font-size: 16px; border-left: 3px solid #d97757; padding-left: 10px; margin: 24px 0 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid #f0ece6; vertical-align: top; }
+  th:first-child, td:first-child { text-align: left; }
+  th { background: #f6f3ef; font-weight: 600; font-size: 12px; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .split > div { min-width: 0; }
+  .footer { margin-top: 32px; padding-top: 14px; border-top: 1px solid #ece6df; font-size: 11px; color: #6b6056; font-style: italic; line-height: 1.6; }
+  .funnel-row { display: grid; grid-template-columns: 1fr 80px 110px; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid #f0ece6; font-size: 13px; }
+  .funnel-row .bar-wrap { background: #f0ece6; border-radius: 4px; height: 22px; overflow: hidden; position: relative; }
+  .funnel-row .bar { background: #d97757; height: 100%; transition: width 0.3s; }
+  .funnel-row .stage-label { display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .funnel-row .stage-name { font-weight: 500; }
+  .funnel-row .count, .funnel-row .pct { font-variant-numeric: tabular-nums; }
+  .badge { display: inline-block; padding: 1px 7px; border-radius: 10px; font-size: 11px; background: #ece6df; color: #6b6056; margin-left: 6px; }
+  .badge.warn { background: #fce4ce; color: #b04444; }
+  .donut-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 8px 0 24px; }
+  .donut-cell { border: 1px solid #ece6df; border-radius: 8px; padding: 12px; background: #fbf9f6; }
+  .donut-cell h3 { font-size: 13px; margin: 0 0 8px; font-weight: 600; color: #4b4036; text-align: center; }
+  .donut-cell .canvas-wrap { position: relative; height: 180px; }
+  .nr-row { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; }
+  .topbar { background: #15171a; border-radius: 10px; padding: 0 18px; height: 52px; display: flex; align-items: center; gap: 14px; margin-bottom: 20px; }
+  .topbar .brand { font-weight: 700; font-size: 15px; color: #fff; letter-spacing: .02em; }
+  .topbar .nav-tab { padding: 6px 14px; border-radius: 6px; font-weight: 500; font-size: 13px; color: #9ca3af; text-decoration: none; transition: background .12s, color .12s; }
+  .topbar .nav-tab:hover { background: rgba(255,255,255,0.06); color: #d1d5db; }
+  .topbar .nav-tab.active { background: rgba(217,119,87,0.18); color: #fff; }
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="brand">{{ brand|upper }}</div>
+  {% if nav_overview_url %}<a href="{{ nav_overview_url }}" class="nav-tab">Overview</a>{% endif %}
+  <a href="{{ nav_ga4_url }}" class="nav-tab active">GA4</a>
+  <a href="{{ nav_meta_url }}" class="nav-tab">Meta</a>
+</div>
+<h1>{{ brand|upper }} — GA4 인터랙티브 대시보드</h1>
+<div class="sub">데이터 범위 {{ date_min }} ~ {{ date_max }} ({{ days }}일 적재) · 작성 {{ generated_at }}</div>
+
+<!-- 컨트롤 (날짜 범위 선택) -->
+<div class="controls">
+  <label>시작</label>
+  <input type="date" id="rangeStart" min="{{ date_min }}" max="{{ date_max }}" value="{{ date_min }}">
+  <label>종료</label>
+  <input type="date" id="rangeEnd" min="{{ date_min }}" max="{{ date_max }}" value="{{ date_max }}">
+  <button class="preset" data-days="1">어제</button>
+  <button class="preset" data-days="7">7일</button>
+  <button class="preset" data-days="14">14일</button>
+  <button class="preset active" data-days="30">30일</button>
+  <span class="range-info" id="rangeInfo"></span>
+</div>
+
+<!-- 1) Headline KPI — 6 카드 -->
+<div class="kpi-row">
+  <div class="kpi">
+    <div class="label">활성 사용자</div>
+    <div class="value" id="kpiActiveUsers">0</div>
+    <div class="delta" id="kpiActiveUsersDelta">— vs 직전 동일기간</div>
+  </div>
+  <div class="kpi">
+    <div class="label">방문 세션</div>
+    <div class="value" id="kpiSessions">0</div>
+    <div class="delta" id="kpiSessionsDelta">— vs 직전 동일기간</div>
+  </div>
+  <div class="kpi">
+    <div class="label">평균 체류시간</div>
+    <div class="value" id="kpiAvgDuration">0초</div>
+    <div class="delta" id="kpiAvgDurationDelta">— vs 직전 동일기간</div>
+  </div>
+  <div class="kpi">
+    <div class="label">구매 (GA4)</div>
+    <div class="value" id="kpiPurchases">0</div>
+    <div class="delta" id="kpiPurchasesDelta">— vs 직전 동일기간</div>
+  </div>
+  <div class="kpi">
+    <div class="label">CVR</div>
+    <div class="value" id="kpiCvr">0.00%</div>
+    <div class="delta" id="kpiCvrDelta">— vs 직전 동일기간</div>
+  </div>
+  <div class="kpi">
+    <div class="label">매출 (GA4 추정)</div>
+    <div class="value" id="kpiRevenue">0원</div>
+    <div class="delta" id="kpiRevenueDelta">— vs 직전 동일기간</div>
+  </div>
+</div>
+
+<!-- 2) 트렌드 차트 — 활성사용자 / 구매 -->
+<h2>일별 트렌드 — 활성 사용자 / 구매</h2>
+<div style="position: relative; height: 280px; margin: 8px 0 24px;">
+  <canvas id="trendChart"></canvas>
+</div>
+
+<!-- 3) 채널 믹스 -->
+<h2 id="channelHeading">채널 믹스</h2>
+<table>
+  <thead><tr><th>채널그룹</th><th>소스 / 매체</th><th>캠페인</th><th>세션</th><th>전환</th><th>매출</th><th>CVR</th></tr></thead>
+  <tbody id="channelTbody"></tbody>
+</table>
+
+<!-- 4) 퍼널 -->
+<h2>구매 퍼널 — 5단계 통과율</h2>
+<div id="funnelBody"></div>
+<p style="font-size: 12px; color: #8a7e72; margin-top: 8px;">※ 전체 CVR (view_item → 구매): <strong id="funnelOverall">0.00%</strong>. cart→purchase 가 100% 초과면 네이버페이 결제(view_cart 미경유)가 섞인 신호.</p>
+
+<!-- 5) 상품 TOP 10 (랜딩 제거) -->
+<h2 id="productHeading">상품 TOP 10</h2>
+<table>
+  <thead><tr><th>상품</th><th>조회</th><th>장바구니</th><th>구매</th><th>매출</th><th>view→ATC</th><th>ATC→구매</th></tr></thead>
+  <tbody id="productTbody"></tbody>
+</table>
+
+<!-- 6) 4-도넛: 성별 / 연령 / 지역 / 기기 -->
+<h2>성별 · 연령 · 지역 · 기기 — 세션 분포</h2>
+<div class="donut-row">
+  <div class="donut-cell"><h3>성별</h3><div class="canvas-wrap"><canvas id="donutGender"></canvas></div></div>
+  <div class="donut-cell"><h3>연령</h3><div class="canvas-wrap"><canvas id="donutAge"></canvas></div></div>
+  <div class="donut-cell"><h3>지역 (시/도 TOP 8)</h3><div class="canvas-wrap"><canvas id="donutRegion"></canvas></div></div>
+  <div class="donut-cell"><h3>기기</h3><div class="canvas-wrap"><canvas id="donutDevice"></canvas></div></div>
+</div>
+<p id="demoThresholdNote" style="font-size: 11px; color: #b04444; margin-top: 6px; display: none;">⚠️ GA4 thresholds applied — 성별/연령 일부가 보호 정책으로 가려졌습니다 (트래픽 작을 때 발생).</p>
+
+<!-- 7) 신규 / 재방문 — 차트 + 표 -->
+<h2>신규 vs 재방문</h2>
+<div class="nr-row">
+  <div style="position: relative; height: 260px;">
+    <canvas id="newReturningChart"></canvas>
+  </div>
+  <div>
+    <table>
+      <thead><tr><th>일자</th><th>신규</th><th>재방문</th><th>신규 비중</th></tr></thead>
+      <tbody id="newReturningTbody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="footer">
+Meta Ads Manager 7d-click + 1d-view 가 매출 SoT. GA4 는 utm 유입·트래픽 분해용 (purchaseRevenue 는 보조 지표). 구매 카운트는 purchase + click_npay_purchase 합산. GA4 인구통계는 thresholds applied 가능. 데이터 범위 {{ date_min }} ~ {{ date_max }} ({{ days }}일 적재).
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const RAW = {{ raw_json|safe }};
+const DATE_MIN = "{{ date_min }}";
+const DATE_MAX = "{{ date_max }}";
+
+// --- 유틸 ---
+const fmtNum = n => Number(n).toLocaleString();
+const fmtWon = n => Number(Math.round(n)).toLocaleString() + "원";
+const fmtPct = n => (Number(n) || 0).toFixed(2) + "%";
+const fmtDuration = s => {
+  const sec = Math.round(Number(s) || 0);
+  const m = Math.floor(sec / 60);
+  const r = sec % 60;
+  return m > 0 ? `${m}분 ${r}초` : `${r}초`;
+};
+
+const PALETTE = ["#d97757", "#5b3d8a", "#2f7a2f", "#c8a464", "#4a8fbe", "#b04444", "#7a6b5d", "#a86bbf"];
+
+function filterByDate(rows, start, end) {
+  return rows.filter(r => r.date >= start && r.date <= end);
+}
+
+function dateAddDays(iso, days) {
+  // UTC 파싱·연산 — KST 등 non-UTC 타임존에서 day-shift 안 생기게
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function dateDiffDays(start, end) {
+  const a = new Date(start + "T00:00:00Z");
+  const b = new Date(end + "T00:00:00Z");
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+// --- 집계 ---
+function sumKey(rows, key) {
+  return rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+}
+
+function avgKey(rows, key) {
+  if (!rows.length) return 0;
+  return sumKey(rows, key) / rows.length;
+}
+
+function aggregateBy(rows, groupKeys, sumKeys) {
+  const buckets = {};
+  for (const r of rows) {
+    const key = groupKeys.map(k => r[k] ?? "").join("|");
+    if (!buckets[key]) {
+      buckets[key] = {};
+      groupKeys.forEach(k => buckets[key][k] = r[k] ?? "");
+      sumKeys.forEach(k => buckets[key][k] = 0);
+    }
+    sumKeys.forEach(k => buckets[key][k] += Number(r[k]) || 0);
+  }
+  return Object.values(buckets);
+}
+
+// --- KPI ---
+function computeKpi(start, end) {
+  const trend = filterByDate(RAW.trend, start, end);
+  const devices = filterByDate(RAW.devices, start, end);
+  const sessions = sumKey(trend, "sessions");
+  const activeUsers = sumKey(trend, "active_users");
+  const purchases = sumKey(trend, "conversions");
+  const cvr = sessions ? purchases / sessions * 100 : 0;
+  const revenue = sumKey(devices, "revenue");
+  const avgDuration = avgKey(trend, "avg_session_duration");
+  const newUsers = sumKey(trend, "new_users");
+  const returning = sumKey(trend, "returning_users");
+  return { sessions, activeUsers, purchases, cvr, revenue, avgDuration, newUsers, returning };
+}
+
+function setDelta(id, cur, prev, opts = {}) {
+  const { isPercentage = false, isInteger = false, isDuration = false, periodDays } = opts;
+  const el = document.getElementById(id);
+  if (!prev) {
+    el.textContent = "직전 동일기간 데이터 없음";
+    el.classList.remove("up", "down");
+    return;
+  }
+  let txt, cls;
+  if (isPercentage) {
+    const diff = cur - prev;
+    cls = diff >= 0 ? "up" : "down";
+    txt = (diff >= 0 ? "+" : "") + diff.toFixed(2) + "p vs 직전 " + periodDays + "일";
+  } else if (isInteger) {
+    const diff = Math.round(cur - prev);
+    cls = diff >= 0 ? "up" : "down";
+    txt = (diff >= 0 ? "+" : "") + diff + "건 vs 직전 " + periodDays + "일";
+  } else if (isDuration) {
+    const diff = cur - prev;
+    cls = diff >= 0 ? "up" : "down";
+    txt = (diff >= 0 ? "+" : "") + Math.round(diff) + "초 vs 직전 " + periodDays + "일";
+  } else {
+    const diff = (cur - prev) / prev * 100;
+    cls = diff >= 0 ? "up" : "down";
+    txt = (diff >= 0 ? "+" : "") + diff.toFixed(1) + "% vs 직전 " + periodDays + "일";
+  }
+  el.textContent = txt;
+  el.classList.remove("up", "down");
+  el.classList.add(cls);
+}
+
+function updateKpiCards(start, end) {
+  const cur = computeKpi(start, end);
+  const periodDays = dateDiffDays(start, end);
+  const priorEnd = dateAddDays(start, -1);
+  const priorStart = dateAddDays(priorEnd, -(periodDays - 1));
+  const prev = computeKpi(priorStart, priorEnd);
+
+  document.getElementById("kpiActiveUsers").textContent = fmtNum(cur.activeUsers);
+  document.getElementById("kpiSessions").textContent = fmtNum(cur.sessions);
+  document.getElementById("kpiAvgDuration").textContent = fmtDuration(cur.avgDuration);
+  document.getElementById("kpiPurchases").textContent = fmtNum(cur.purchases);
+  document.getElementById("kpiCvr").textContent = fmtPct(cur.cvr);
+  document.getElementById("kpiRevenue").textContent = fmtWon(cur.revenue);
+
+  setDelta("kpiActiveUsersDelta", cur.activeUsers, prev.activeUsers, { periodDays });
+  setDelta("kpiSessionsDelta", cur.sessions, prev.sessions, { periodDays });
+  setDelta("kpiAvgDurationDelta", cur.avgDuration, prev.avgDuration, { isDuration: true, periodDays });
+  setDelta("kpiPurchasesDelta", cur.purchases, prev.purchases, { isInteger: true, periodDays });
+  setDelta("kpiCvrDelta", cur.cvr, prev.cvr, { isPercentage: true, periodDays });
+  setDelta("kpiRevenueDelta", cur.revenue, prev.revenue, { periodDays });
+}
+
+// --- 트렌드 차트 ---
+let trendChart;
+
+function initTrendChart() {
+  const ctx = document.getElementById("trendChart").getContext("2d");
+  trendChart = new Chart(ctx, {
+    type: "line",
+    data: { labels: [], datasets: [
+      { label: "활성 사용자", data: [], borderColor: "#d97757", backgroundColor: "rgba(217,119,87,0.08)", yAxisID: "y", tension: 0.25, fill: true },
+      { label: "구매", data: [], borderColor: "#5b3d8a", backgroundColor: "rgba(91,61,138,0.08)", yAxisID: "y1", tension: 0.25, fill: false },
+    ] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        y: { position: "left", title: { display: true, text: "활성 사용자" }, beginAtZero: true },
+        y1: { position: "right", title: { display: true, text: "구매" }, beginAtZero: true, grid: { drawOnChartArea: false } },
+      },
+      plugins: { legend: { position: "top" } },
+    },
+  });
+}
+
+function updateTrendChart(start, end) {
+  const trend = filterByDate(RAW.trend, start, end).sort((a, b) => a.date.localeCompare(b.date));
+  trendChart.data.labels = trend.map(r => r.date);
+  trendChart.data.datasets[0].data = trend.map(r => Number(r.active_users) || 0);
+  trendChart.data.datasets[1].data = trend.map(r => Number(r.conversions) || 0);
+  trendChart.update();
+}
+
+// --- 채널 ---
+function updateChannelTable(start, end) {
+  const rows = filterByDate(RAW.channels, start, end);
+  const agg = aggregateBy(rows, ["channel_group", "source", "medium", "campaign"], ["sessions", "conversions", "revenue"]);
+  agg.forEach(r => r.cvr = r.sessions ? r.conversions / r.sessions * 100 : 0);
+  agg.sort((a, b) => (b.revenue - a.revenue) || (b.conversions - a.conversions) || (b.sessions - a.sessions));
+  const top = agg.slice(0, 8);
+  document.getElementById("channelHeading").textContent = `채널 믹스 — 매출 TOP ${top.length}`;
+  document.getElementById("channelTbody").innerHTML = top.map(c => `
+    <tr>
+      <td>${c.channel_group || "(unset)"}</td>
+      <td>${c.source} / ${c.medium}</td>
+      <td>${c.campaign || "(direct)"}</td>
+      <td>${fmtNum(c.sessions)}</td>
+      <td>${fmtNum(c.conversions)}</td>
+      <td>${fmtWon(c.revenue)}</td>
+      <td>${fmtPct(c.cvr)}</td>
+    </tr>
+  `).join("");
+}
+
+// --- 퍼널 ---
+function updateFunnel(start, end) {
+  const rows = filterByDate(RAW.funnels, start, end);
+  const sums = {
+    page_view: sumKey(rows, "page_view"),
+    view_item: sumKey(rows, "view_item"),
+    add_to_cart: sumKey(rows, "add_to_cart"),
+    view_cart: sumKey(rows, "view_cart"),
+    purchase_total: sumKey(rows, "purchase_total"),
+  };
+  const pct = (a, b) => b ? (a / b * 100) : 0;
+  const stages = [
+    { name: "페이지뷰", count: sums.page_view, pct: null },
+    { name: "PDP 조회 (view_item)", count: sums.view_item, pct: pct(sums.view_item, sums.page_view) },
+    { name: "장바구니 추가 (add_to_cart)", count: sums.add_to_cart, pct: pct(sums.add_to_cart, sums.view_item) },
+    { name: "장바구니 조회 (view_cart)", count: sums.view_cart, pct: pct(sums.view_cart, sums.add_to_cart) },
+    { name: "구매 완료", count: sums.purchase_total, pct: pct(sums.purchase_total, sums.view_cart) },
+  ];
+  const max = stages[0].count || 1;
+  document.getElementById("funnelBody").innerHTML = stages.map(s => `
+    <div class="funnel-row">
+      <div class="stage-label">
+        <span class="stage-name">${s.name}</span>
+        ${s.pct !== null ? `<span class="badge ${s.pct < 10 ? "warn" : ""}">${s.pct.toFixed(1)}%</span>` : ""}
+      </div>
+      <div class="count">${fmtNum(s.count)}</div>
+      <div class="bar-wrap"><div class="bar" style="width: ${(s.count / max * 100).toFixed(1)}%;"></div></div>
+    </div>
+  `).join("");
+  const overallCvr = pct(sums.purchase_total, sums.view_item);
+  document.getElementById("funnelOverall").textContent = fmtPct(overallCvr);
+}
+
+// --- 상품 ---
+function updateProduct(start, end) {
+  const products = filterByDate(RAW.products, start, end);
+  const productAgg = aggregateBy(products, ["item_id", "item_name"], ["item_views", "add_to_carts", "purchases", "revenue"]);
+  productAgg.forEach(p => {
+    p.view_to_atc = p.item_views ? p.add_to_carts / p.item_views * 100 : 0;
+    p.atc_to_purchase = p.add_to_carts ? p.purchases / p.add_to_carts * 100 : 0;
+  });
+  productAgg.sort((a, b) => (b.revenue - a.revenue) || (b.purchases - a.purchases) || (b.item_views - a.item_views));
+  const topP = productAgg.slice(0, 10);
+  document.getElementById("productHeading").textContent = `상품 TOP ${topP.length}`;
+  document.getElementById("productTbody").innerHTML = topP.map(p => {
+    const name = p.item_name || "(unset)";
+    const short = name.length > 40 ? name.slice(0, 40) + "…" : name;
+    return `<tr><td title="${name.replace(/"/g, '&quot;')}">${short}</td><td>${fmtNum(p.item_views)}</td><td>${fmtNum(p.add_to_carts)}</td><td>${fmtNum(p.purchases)}</td><td>${fmtWon(p.revenue)}</td><td>${fmtPct(p.view_to_atc)}</td><td>${fmtPct(p.atc_to_purchase)}</td></tr>`;
+  }).join("");
+}
+
+// --- 4-도넛 (성별 / 연령 / 지역 / 기기) ---
+const donutCharts = {};
+
+function makeDonut(canvasId) {
+  const ctx = document.getElementById(canvasId).getContext("2d");
+  return new Chart(ctx, {
+    type: "doughnut",
+    data: { labels: [], datasets: [{ data: [], backgroundColor: PALETTE, borderWidth: 0 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 11 }, padding: 6 } },
+        tooltip: {
+          callbacks: {
+            label: ctx => {
+              const total = ctx.dataset.data.reduce((a, b) => a + b, 0) || 1;
+              const v = ctx.raw;
+              return `${ctx.label}: ${fmtNum(v)} (${(v / total * 100).toFixed(1)}%)`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+function updateDonut(chart, labels, values) {
+  chart.data.labels = labels;
+  chart.data.datasets[0].data = values;
+  chart.update();
+}
+
+function updateDonuts(start, end) {
+  // 성별
+  const demos = filterByDate(RAW.demos, start, end);
+  const genderAgg = aggregateBy(demos, ["gender"], ["sessions"]);
+  genderAgg.sort((a, b) => b.sessions - a.sessions);
+  updateDonut(donutCharts.gender,
+    genderAgg.map(g => g.gender || "(unknown)"),
+    genderAgg.map(g => g.sessions));
+
+  // 연령
+  const ageAgg = aggregateBy(demos, ["age_bracket"], ["sessions"]);
+  ageAgg.sort((a, b) => {
+    const ax = a.age_bracket || "zzz";
+    const bx = b.age_bracket || "zzz";
+    return ax.localeCompare(bx);
+  });
+  updateDonut(donutCharts.age,
+    ageAgg.map(g => g.age_bracket || "(unknown)"),
+    ageAgg.map(g => g.sessions));
+
+  // 지역 TOP 8
+  const geos = filterByDate(RAW.geos, start, end);
+  const geoAgg = aggregateBy(geos, ["region"], ["sessions"]);
+  geoAgg.sort((a, b) => b.sessions - a.sessions);
+  const top8 = geoAgg.slice(0, 8);
+  const restSum = geoAgg.slice(8).reduce((s, r) => s + r.sessions, 0);
+  const geoLabels = top8.map(g => g.region || "(unset)");
+  const geoValues = top8.map(g => g.sessions);
+  if (restSum > 0) { geoLabels.push("기타"); geoValues.push(restSum); }
+  updateDonut(donutCharts.region, geoLabels, geoValues);
+
+  // 기기
+  const devices = filterByDate(RAW.devices, start, end);
+  const deviceAgg = aggregateBy(devices, ["device_category"], ["sessions"]);
+  deviceAgg.sort((a, b) => b.sessions - a.sessions);
+  updateDonut(donutCharts.device,
+    deviceAgg.map(d => d.device_category),
+    deviceAgg.map(d => d.sessions));
+
+  // thresholds 노트
+  const anyThreshold = demos.some(d => d.thresholds_applied === "true" || d.thresholds_applied === true);
+  document.getElementById("demoThresholdNote").style.display = anyThreshold ? "block" : "none";
+}
+
+// --- 신규 / 재방문 차트 + 표 ---
+let newReturningChart;
+
+function initNewReturningChart() {
+  const ctx = document.getElementById("newReturningChart").getContext("2d");
+  newReturningChart = new Chart(ctx, {
+    type: "bar",
+    data: { labels: [], datasets: [
+      { label: "신규", data: [], backgroundColor: "#d97757", stack: "users" },
+      { label: "재방문", data: [], backgroundColor: "#5b3d8a", stack: "users" },
+    ] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: { stacked: true },
+        y: { stacked: true, beginAtZero: true, title: { display: true, text: "사용자" } },
+      },
+      plugins: { legend: { position: "top" } },
+    },
+  });
+}
+
+function updateNewReturning(start, end) {
+  const trend = filterByDate(RAW.trend, start, end).sort((a, b) => a.date.localeCompare(b.date));
+  newReturningChart.data.labels = trend.map(r => r.date);
+  newReturningChart.data.datasets[0].data = trend.map(r => Number(r.new_users) || 0);
+  newReturningChart.data.datasets[1].data = trend.map(r => Number(r.returning_users) || 0);
+  newReturningChart.update();
+
+  // 표 — 최신 → 과거 순서
+  const tableRows = trend.slice().reverse().map(r => {
+    const nu = Number(r.new_users) || 0;
+    const ru = Number(r.returning_users) || 0;
+    const total = nu + ru;
+    const pct = total ? (nu / total * 100) : 0;
+    return `<tr><td>${r.date}</td><td>${fmtNum(nu)}</td><td>${fmtNum(ru)}</td><td>${pct.toFixed(1)}%</td></tr>`;
+  });
+  document.getElementById("newReturningTbody").innerHTML = tableRows.join("");
+}
+
+// --- 메인 업데이트 ---
+function refresh() {
+  const start = document.getElementById("rangeStart").value;
+  const end = document.getElementById("rangeEnd").value;
+  const days = dateDiffDays(start, end);
+  document.getElementById("rangeInfo").textContent = `${start} ~ ${end} (${days}일)`;
+  updateKpiCards(start, end);
+  updateTrendChart(start, end);
+  updateChannelTable(start, end);
+  updateFunnel(start, end);
+  updateProduct(start, end);
+  updateDonuts(start, end);
+  updateNewReturning(start, end);
+}
+
+// --- 이벤트 ---
+document.querySelectorAll(".preset").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const days = parseInt(btn.dataset.days, 10);
+    const end = DATE_MAX;
+    const start = days === 1 ? end : dateAddDays(end, -(days - 1));
+    const clampedStart = start < DATE_MIN ? DATE_MIN : start;
+    document.getElementById("rangeStart").value = clampedStart;
+    document.getElementById("rangeEnd").value = end;
+    document.querySelectorAll(".preset").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    refresh();
+  });
+});
+
+document.getElementById("rangeStart").addEventListener("change", () => {
+  document.querySelectorAll(".preset").forEach(b => b.classList.remove("active"));
+  refresh();
+});
+document.getElementById("rangeEnd").addEventListener("change", () => {
+  document.querySelectorAll(".preset").forEach(b => b.classList.remove("active"));
+  refresh();
+});
+
+// --- 초기 실행 ---
+initTrendChart();
+initNewReturningChart();
+donutCharts.gender = makeDonut("donutGender");
+donutCharts.age = makeDonut("donutAge");
+donutCharts.region = makeDonut("donutRegion");
+donutCharts.device = makeDonut("donutDevice");
+refresh();
+</script>
+</body>
+</html>

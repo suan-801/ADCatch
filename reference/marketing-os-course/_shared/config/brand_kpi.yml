@@ -1,0 +1,22 @@
+# 브랜드별 KPI 임계값·가드레일
+# 신호등: 🟢 green_at 도달, 🔴 red_at 미달, 그 사이 🟡
+
+sample_brand:
+  # ─ 가드레일 임계값 (신호등) ─
+  roas_green: 2.5        # ROAS ≥ 2.5 🟢
+  roas_red: 1.3          # ROAS < 1.3 🔴
+  ctr_red_pct: 1.5       # CTR < 1.5% 🔴 (보통 5%대)
+  cpa_red: 30000         # CPA > 30,000원 🔴
+  spend_min: 10000       # 1만원 미만 지출은 노이즈 → 분석 제외
+  daily_budget: 500000   # 일 예산 (참고용, 가드레일 알림에 사용)
+  # ─ 목표값 (Overview 달성률 계산용) ─
+  kpi_period: monthly             # monthly | weekly
+  target_roas: 2.5                # 목표 ROAS
+  target_cpa: 22000               # 목표 CPA
+  target_ctr_pct: 3.0             # 목표 CTR(%)
+  monthly_revenue_goal: 15000000  # 월 매출 목표 (KRW)
+  monthly_purchase_goal: 600      # 월 구매 건수 목표
+
+# 다른 브랜드를 추가하려면 같은 구조로 키 추가
+# {brand_slug}:
+#   roas_green: ...

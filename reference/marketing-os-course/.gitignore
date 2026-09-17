@@ -1,0 +1,27 @@
+# 자격증명·환경변수
+.env
+.env.local
+*.env
+!.env.example
+.mcp.json
+
+# Google ADC (gcloud auth application-default login 결과)
+application_default_credentials.json
+
+# OS·에디터 부산물
+.DS_Store
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+09_tracking/.env
+09_tracking/oauth-client.json
+09_tracking/ga4-credentials.json
+09_tracking/*.json

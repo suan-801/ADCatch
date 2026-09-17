@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>{{ brand }} Clarity UX — {{ period_start }} ~ {{ period_end }}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; padding: 0; font-family: -apple-system, "Pretendard", "Inter", sans-serif; background: #f5f7fb; color: #1a1410; line-height: 1.5; }
+  .topbar { background: #15171a; color: #e5e7eb; height: 56px; font-size: 13px; }
+  .topbar-inner { max-width: 1320px; margin: 0 auto; padding: 0 28px; height: 100%; display: flex; align-items: center; gap: 20px; }
+  .topbar .brand { font-weight: 700; font-size: 15px; letter-spacing: .02em; color: #fff; }
+  .topbar .nav-tab { padding: 6px 14px; border-radius: 6px; font-weight: 500; color: #9ca3af; cursor: pointer; text-decoration: none; transition: background .12s, color .12s; }
+  .topbar .nav-tab:hover { background: rgba(255,255,255,0.05); color: #d1d5db; }
+  .topbar .nav-tab.active { background: rgba(255,255,255,0.08); color: #fff; }
+  .topbar .spacer { flex: 1; }
+
+  .page { max-width: 1320px; margin: 0 auto; padding: 24px 28px 40px; }
+  .page-head { display: flex; align-items: center; gap: 16px; margin-bottom: 18px; }
+  .page-head h1 { font-size: 22px; margin: 0; font-weight: 700; }
+  .page-head .sub { color: #6b7280; font-size: 13px; }
+
+  .controls { background: #fff; border: 1px solid #e5e9f2; border-radius: 12px; padding: 14px 18px; margin-bottom: 20px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  .controls label { font-size: 12px; color: #6b7280; font-weight: 600; }
+  .controls input[type=date] { font-size: 13px; padding: 5px 8px; border: 1px solid #e5e9f2; border-radius: 6px; font-family: inherit; }
+  .preset { padding: 5px 12px; font-size: 12px; border: 1px solid #e5e9f2; background: white; border-radius: 16px; cursor: pointer; color: #1a1410; transition: all .15s; }
+  .preset:hover { background: #5b3d8a; color: white; border-color: #5b3d8a; }
+  .preset.active { background: #15171a; color: white; border-color: #15171a; }
+  .range-info { margin-left: auto; font-size: 12px; color: #6b7280; }
+
+  /* KPI 4 신호등 + 세션 1 = 5 카드 */
+  .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 18px; }
+  .kpi-card { background: #fff; border: 1px solid #e5e9f2; border-radius: 12px; padding: 14px 16px 10px; display: flex; flex-direction: column; gap: 4px; }
+  .kpi-card .label { font-size: 11px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; display: flex; align-items: center; gap: 4px; }
+  .kpi-card .light { font-size: 14px; }
+  .kpi-card .value { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .kpi-card .delta { font-size: 11px; align-self: flex-start; padding: 2px 7px; border-radius: 10px; }
+  .delta.up { background: #fdecec; color: #b04444; }    /* UX 신호는 ↑ = 나쁨 */
+  .delta.down { background: #e9f7ec; color: #2f7a2f; }
+  .delta.neutral { background: #f3f4f6; color: #6b7280; }
+  .kpi-card .spark-wrap { margin-top: 6px; padding-top: 8px; border-top: 1px dashed #eef0f5; height: 56px; position: relative; }
+  .kpi-card .spark { width: 100%; height: 100%; display: block; }
+  .kpi-card.signal-red { border-color: #f5c2c2; box-shadow: 0 0 0 1px rgba(176,68,68,0.08); }
+  .kpi-card.signal-yellow { border-color: #f0dba6; }
+
+  /* 세션 카드는 신호등 색 제외 (수치만) */
+  .kpi-card.sessions { border-color: #e5e9f2; }
+  .kpi-card.sessions .delta.up { background: #e9f7ec; color: #2f7a2f; }
+  .kpi-card.sessions .delta.down { background: #fdecec; color: #b04444; }
+
+  /* 카드 공통 */
+  .card { background: #fff; border: 1px solid #e5e9f2; border-radius: 12px; padding: 18px; }
+  .card-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 14px; }
+  .card-head h2 { font-size: 14px; font-weight: 700; margin: 0; color: #1a1410; }
+  .card-head .hint { font-size: 11px; color: #6b7280; }
+
+  /* 메인 차트 */
+  .chart-wrap { position: relative; height: 280px; }
+  .row-hero { margin-bottom: 14px; }
+
+  /* 일별 하이라이트 */
+  .daily-card { margin-bottom: 14px; }
+  .daily-table-wrap { max-height: 360px; overflow-y: auto; border: 1px solid #eef0f5; border-radius: 8px; }
+  .daily-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .daily-table th { position: sticky; top: 0; z-index: 1; background: #f9fafc; padding: 8px 10px; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #e5e9f2; text-align: right; font-weight: 600; }
+  .daily-table th:first-child { text-align: left; }
+  .daily-table td { padding: 7px 10px; text-align: right; border-bottom: 1px solid #f3f4f7; font-variant-numeric: tabular-nums; }
+  .daily-table td:first-child { text-align: left; font-weight: 500; color: #1a1410; }
+  .daily-table tbody tr:last-child td { border-bottom: 0; }
+  .daily-table tbody tr:hover td { background: #fafbfd; }
+  /* UX 메트릭은 높을수록 나쁨 → 빨강 음영 */
+  .daily-table td.bad-1 { background: #fdecec; color: #8a3a3a; font-weight: 700; }
+  .daily-table td.bad-2 { background: #fbe0e0; color: #a04a4a; font-weight: 600; }
+  .daily-table td.bad-3 { background: #fcedee; color: #b56767; }
+  .daily-table td.threshold-red { color: #b04444; font-weight: 700; }
+  .daily-table td.threshold-yellow { color: #8a6d2a; font-weight: 600; }
+  .daily-legend { font-size: 10px; color: #6b7280; display: flex; gap: 10px; align-items: center; }
+  .daily-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+
+  /* 가설 & 페인 페이지 2-col */
+  .row-2col { display: grid; grid-template-columns: 1.2fr 1fr; gap: 14px; margin-bottom: 14px; }
+  .hypothesis { padding: 12px 14px; border-radius: 8px; background: #fdf6f0; border-left: 3px solid #d97757; margin-bottom: 10px; font-size: 12px; line-height: 1.6; }
+  .hypothesis:last-child { margin-bottom: 0; }
+  .hypothesis .h-title { font-weight: 700; font-size: 13px; color: #8a4d2a; margin-bottom: 4px; }
+  .hypothesis .h-meta { color: #6b7280; font-size: 11px; }
+  .hypothesis .h-line { margin-top: 4px; }
+  .hypothesis .h-line strong { color: #1a1410; }
+
+  .pain-row { display: grid; grid-template-columns: 1fr 60px 60px 60px 60px; gap: 8px; padding: 8px 0; border-bottom: 1px solid #f0f2f6; font-size: 12px; align-items: center; }
+  .pain-row:last-child { border-bottom: 0; }
+  .pain-row .url { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #1a1410; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pain-row .pct { text-align: right; font-variant-numeric: tabular-nums; }
+  .pain-row .pct.red { color: #b04444; font-weight: 600; }
+  .pain-row .pct.yellow { color: #8a6d2a; }
+  .pain-header { display: grid; grid-template-columns: 1fr 60px 60px 60px 60px; gap: 8px; padding: 6px 0; font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; border-bottom: 1px solid #eef0f5; font-weight: 600; }
+  .pain-header .pct { text-align: right; }
+
+  .empty-msg { font-size: 12px; color: #9ca3af; padding: 20px 0; text-align: center; }
+
+  .footer { margin-top: 24px; padding: 16px 20px; background: #fff; border: 1px solid #e5e9f2; border-radius: 12px; font-size: 11px; color: #6b7280; line-height: 1.7; }
+
+  .quota-note { background: #f0f7ff; border-left: 3px solid #4a8fbe; padding: 8px 12px; border-radius: 6px; font-size: 11px; color: #2c5d85; margin-bottom: 14px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">{{ brand|upper }}</div>
+    {% if nav_overview_url %}<a href="{{ nav_overview_url }}" class="nav-tab">Overview</a>{% endif %}
+    <a href="{{ nav_ga4_url }}" class="nav-tab">GA4</a>
+    <a href="{{ nav_meta_url }}" class="nav-tab">Meta</a>
+    <a href="{{ nav_clarity_url }}" class="nav-tab active">Clarity</a>
+    <div class="spacer"></div>
+  </div>
+</div>
+
+<div class="page">
+  <div class="page-head">
+    <div>
+      <h1>퍼포먼스 대시보드</h1>
+      <div class="sub">[브랜드명] Clarity UX 신호 — Rage · Dead · Scroll · Quickback</div>
+    </div>
+  </div>
+
+  <!-- 날짜 컨트롤 -->
+  <div class="controls">
+    <label>시작</label>
+    <input type="date" id="rangeStart" min="{{ date_min }}" max="{{ date_max }}" value="{{ date_min }}">
+    <label>종료</label>
+    <input type="date" id="rangeEnd" min="{{ date_min }}" max="{{ date_max }}" value="{{ date_max }}">
+    <button class="preset" data-days="1">어제</button>
+    <button class="preset" data-days="7">7일</button>
+    <button class="preset" data-days="14">14일</button>
+    <button class="preset active" data-days="30">30일</button>
+    <span class="range-info" id="rangeInfo"></span>
+  </div>
+
+  <div class="quota-note">
+    Clarity API 호출 한도 일 10회 — 본 페이지는 시트 캐시(clarity_daily)만 사용. 라이브 호출은 Clarity MCP에서 별도 (URL 차원 · 세션 녹화).
+  </div>
+
+  <!-- KPI 5 (세션 + 4 신호등) -->
+  <div class="kpi-grid">
+    <div class="kpi-card sessions">
+      <div class="label">세션</div>
+      <div class="value" id="kpiSessions">0</div>
+      <span class="delta" id="kpiSessionsDelta">—</span>
+      <div class="spark-wrap"><canvas class="spark" id="sparkSessions"></canvas></div>
+    </div>
+    <div class="kpi-card" id="cardRage">
+      <div class="label">Rage Click <span class="light" id="lightRage">⚪</span></div>
+      <div class="value" id="kpiRage">0.00%</div>
+      <span class="delta" id="kpiRageDelta">—</span>
+      <div class="spark-wrap"><canvas class="spark" id="sparkRage"></canvas></div>
+    </div>
+    <div class="kpi-card" id="cardDead">
+      <div class="label">Dead Click <span class="light" id="lightDead">⚪</span></div>
+      <div class="value" id="kpiDead">0.00%</div>
+      <span class="delta" id="kpiDeadDelta">—</span>
+      <div class="spark-wrap"><canvas class="spark" id="sparkDead"></canvas></div>
+    </div>
+    <div class="kpi-card" id="cardScroll">
+      <div class="label">Excessive Scroll <span class="light" id="lightScroll">⚪</span></div>
+      <div class="value" id="kpiScroll">0.00%</div>
+      <span class="delta" id="kpiScrollDelta">—</span>
+      <div class="spark-wrap"><canvas class="spark" id="sparkScroll"></canvas></div>
+    </div>
+    <div class="kpi-card" id="cardQuickback">
+      <div class="label">Quick Back <span class="light" id="lightQuickback">⚪</span></div>
+      <div class="value" id="kpiQuickback">0.00%</div>
+      <span class="delta" id="kpiQuickbackDelta">—</span>
+      <div class="spark-wrap"><canvas class="spark" id="sparkQuickback"></canvas></div>
+    </div>
+  </div>
+
+  <!-- 메인 차트 -->
+  <div class="row-hero">
+    <div class="card">
+      <div class="card-head">
+        <h2>일별 UX 신호 추세 (%)</h2>
+        <span class="hint">세션 중 해당 신호 발생 비율 (Rage · Dead · Scroll · Quickback)</span>
+      </div>
+      <div class="chart-wrap"><canvas id="trendChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- 일별 하이라이트 -->
+  <div class="card daily-card">
+    <div class="card-head">
+      <h2>일별 하이라이트</h2>
+      <span class="daily-legend">
+        <span><span class="sw" style="background:#fdecec"></span>최악 1위</span>
+        <span><span class="sw" style="background:#fbe0e0"></span>2위</span>
+        <span><span class="sw" style="background:#fcedee"></span>3위</span>
+        <span style="color:#6b7280;">· UX 신호는 ↑일수록 나쁨</span>
+      </span>
+    </div>
+    <div class="daily-table-wrap">
+      <table class="daily-table">
+        <thead>
+          <tr>
+            <th>날짜</th>
+            <th>세션</th>
+            <th>Rage %</th>
+            <th>Dead %</th>
+            <th>Scroll %</th>
+            <th>Quickback %</th>
+          </tr>
+        </thead>
+        <tbody id="dailyTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 가설 + 페인 페이지 -->
+  <div class="row-2col">
+    <div class="card">
+      <div class="card-head">
+        <h2>최신 CRO 가설 (주간 리포트)</h2>
+        <span class="hint">{% if cro_meta.label %}{{ cro_meta.label }}{% else %}없음{% endif %}</span>
+      </div>
+      {% if hypotheses %}
+        {% for h in hypotheses %}
+        <div class="hypothesis">
+          <div class="h-title">{{ h.title }}</div>
+          {% if h.evidence %}<div class="h-meta">근거 — {{ h.evidence }}</div>{% endif %}
+          {% if h.hypothesis %}<div class="h-line"><strong>가설:</strong> {{ h.hypothesis }}</div>{% endif %}
+          {% if h.action %}<div class="h-line"><strong>액션:</strong> {{ h.action }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty-msg">최신 CRO 마크다운 없음 — <code>python3 scripts/cro_report.py</code> 실행 필요</div>
+      {% endif %}
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h2>TOP 페인 페이지</h2>
+        <span class="hint">cro_report URL 차원 결과</span>
+      </div>
+      {% if pain_pages %}
+        <div class="pain-header">
+          <span>URL</span>
+          <span class="pct">Rage</span>
+          <span class="pct">Dead</span>
+          <span class="pct">Scroll</span>
+          <span class="pct">Quickback</span>
+        </div>
+        {% for p in pain_pages %}
+        <div class="pain-row">
+          <span class="url" title="{{ p.url }}">{{ p.url }}</span>
+          <span class="pct {{ p.rage_class }}">{{ "%.1f"|format(p.rage_pct) }}</span>
+          <span class="pct {{ p.dead_class }}">{{ "%.1f"|format(p.dead_pct) }}</span>
+          <span class="pct {{ p.scroll_class }}">{{ "%.1f"|format(p.scroll_pct) }}</span>
+          <span class="pct {{ p.quickback_class }}">{{ "%.1f"|format(p.quickback_pct) }}</span>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty-msg">페인 페이지 데이터 없음</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="footer">
+    Clarity 시트 캐시 기반 (API 호출 안 함 · 일 10회 한도 보호). Meta 는 ROAS·매출, GA4 는 utm 유입·트래픽, Clarity 는 UX 신호 — 역할 분리. 데이터 범위 {{ date_min }} ~ {{ date_max }} ({{ days }}일 적재). 신호등 임계값: 분노 클릭 빨강≥{{ thresholds.rage.red }}%·노랑≥{{ thresholds.rage.yellow }}%, 빈 클릭 빨강≥{{ thresholds.dead.red }}%·노랑≥{{ thresholds.dead.yellow }}%, 과도 스크롤 빨강≥{{ thresholds.scroll.red }}%·노랑≥{{ thresholds.scroll.yellow }}%, 빠른 이탈 빨강≥{{ thresholds.quickback.red }}%·노랑≥{{ thresholds.quickback.yellow }}%.
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+const RAW = {{ raw_json|safe }};
+const DATE_MIN = "{{ date_min }}";
+const DATE_MAX = "{{ date_max }}";
+const THRESHOLDS = {{ thresholds_json|safe }};
+
+const fmtNum = n => Number(n).toLocaleString();
+const fmtPct = n => (Number(n) || 0).toFixed(2) + "%";
+const fmtPct1 = n => (Number(n) || 0).toFixed(1);
+
+function filterByDate(rows, start, end) {
+  return rows.filter(r => r.date >= start && r.date <= end);
+}
+function dateAddDays(iso, days) {
+  // UTC 파싱·연산 — KST 등 non-UTC 타임존에서 day-shift 안 생기게
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function dateDiffDays(start, end) {
+  return Math.round((new Date(end + "T00:00:00Z") - new Date(start + "T00:00:00Z")) / 86400000) + 1;
+}
+function sumKey(rows, key) { return rows.reduce((s, r) => s + (Number(r[key]) || 0), 0); }
+
+function light(pct, metric) {
+  const t = THRESHOLDS[metric];
+  if (pct >= t.red) return "🔴";
+  if (pct >= t.yellow) return "🟡";
+  return "🟢";
+}
+function lightClass(pct, metric) {
+  const t = THRESHOLDS[metric];
+  if (pct >= t.red) return "signal-red";
+  if (pct >= t.yellow) return "signal-yellow";
+  return "";
+}
+
+function computeAggregate(start, end) {
+  const rows = filterByDate(RAW.daily, start, end);
+  const sessions = sumKey(rows, "sessions");
+  const dead = sumKey(rows, "dead_clicks");
+  const rage = sumKey(rows, "rage_clicks");
+  const scroll = sumKey(rows, "excessive_scroll");
+  const quickback = sumKey(rows, "quick_back");
+  const pct = v => sessions ? v / sessions * 100 : 0;
+  return {
+    sessions,
+    rage_pct: pct(rage),
+    dead_pct: pct(dead),
+    scroll_pct: pct(scroll),
+    quickback_pct: pct(quickback),
+  };
+}
+
+function setDeltaPill(id, cur, prev, opts = {}) {
+  const { isInteger, invert } = opts;
+  const el = document.getElementById(id);
+  el.classList.remove("up", "down", "neutral");
+  if (!prev) {
+    el.textContent = "— 직전기간 없음";
+    el.classList.add("neutral");
+    return;
+  }
+  let diff, txt;
+  if (isInteger) {
+    diff = Math.round(cur - prev);
+    txt = (diff >= 0 ? "▲ +" : "▼ ") + diff;
+  } else {
+    diff = cur - prev;
+    txt = (diff >= 0 ? "▲ " : "▼ ") + Math.abs(diff).toFixed(2) + "p";
+  }
+  let cls = diff >= 0 ? "up" : "down";
+  // invert=true 일 때 (sessions) 는 up=좋음 으로 표시
+  if (invert) cls = diff >= 0 ? "down" : "up";  // sessions: ↑ = 좋음을 down(녹색) 클래스로 매핑
+  el.textContent = txt;
+  el.classList.add(cls);
+}
+
+const sparkCharts = {};
+function makeSpark(canvasId, color) {
+  const ctx = document.getElementById(canvasId).getContext("2d");
+  return new Chart(ctx, {
+    type: "line",
+    data: { labels: [], datasets: [{ data: [], borderColor: color, backgroundColor: hexToRgba(color, 0.18), borderWidth: 1.5, fill: true, tension: 0.35, pointRadius: 0 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { display: false, beginAtZero: true } },
+    },
+  });
+}
+function hexToRgba(hex, a) {
+  const n = parseInt(hex.replace("#", ""), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+function updateSpark(chart, values) {
+  chart.data.labels = values.map((_, i) => i);
+  chart.data.datasets[0].data = values;
+  chart.update("none");
+}
+
+function dailyPctSeries(rows) {
+  return rows.map(r => {
+    const s = Number(r.sessions) || 0;
+    const pct = v => s ? Number(v) / s * 100 : 0;
+    return {
+      date: r.date,
+      sessions: s,
+      rage_pct: pct(r.rage_clicks),
+      dead_pct: pct(r.dead_clicks),
+      scroll_pct: pct(r.excessive_scroll),
+      quickback_pct: pct(r.quick_back),
+    };
+  });
+}
+
+function updateKpiCards(start, end) {
+  const cur = computeAggregate(start, end);
+  const periodDays = dateDiffDays(start, end);
+  const priorEnd = dateAddDays(start, -1);
+  const priorStart = dateAddDays(priorEnd, -(periodDays - 1));
+  const prev = computeAggregate(priorStart, priorEnd);
+
+  document.getElementById("kpiSessions").textContent = fmtNum(cur.sessions);
+  document.getElementById("kpiRage").textContent = fmtPct(cur.rage_pct);
+  document.getElementById("kpiDead").textContent = fmtPct(cur.dead_pct);
+  document.getElementById("kpiScroll").textContent = fmtPct(cur.scroll_pct);
+  document.getElementById("kpiQuickback").textContent = fmtPct(cur.quickback_pct);
+
+  document.getElementById("lightRage").textContent = light(cur.rage_pct, "rage");
+  document.getElementById("lightDead").textContent = light(cur.dead_pct, "dead");
+  document.getElementById("lightScroll").textContent = light(cur.scroll_pct, "scroll");
+  document.getElementById("lightQuickback").textContent = light(cur.quickback_pct, "quickback");
+
+  for (const [id, metric, val] of [
+    ["cardRage", "rage", cur.rage_pct],
+    ["cardDead", "dead", cur.dead_pct],
+    ["cardScroll", "scroll", cur.scroll_pct],
+    ["cardQuickback", "quickback", cur.quickback_pct],
+  ]) {
+    const card = document.getElementById(id);
+    card.classList.remove("signal-red", "signal-yellow");
+    const cls = lightClass(val, metric);
+    if (cls) card.classList.add(cls);
+  }
+
+  setDeltaPill("kpiSessionsDelta", cur.sessions, prev.sessions, { isInteger: true, invert: true });
+  setDeltaPill("kpiRageDelta", cur.rage_pct, prev.rage_pct);
+  setDeltaPill("kpiDeadDelta", cur.dead_pct, prev.dead_pct);
+  setDeltaPill("kpiScrollDelta", cur.scroll_pct, prev.scroll_pct);
+  setDeltaPill("kpiQuickbackDelta", cur.quickback_pct, prev.quickback_pct);
+
+  const sorted = dailyPctSeries(filterByDate(RAW.daily, start, end).sort((a, b) => a.date.localeCompare(b.date)));
+  updateSpark(sparkCharts.sessions, sorted.map(r => r.sessions));
+  updateSpark(sparkCharts.rage, sorted.map(r => r.rage_pct));
+  updateSpark(sparkCharts.dead, sorted.map(r => r.dead_pct));
+  updateSpark(sparkCharts.scroll, sorted.map(r => r.scroll_pct));
+  updateSpark(sparkCharts.quickback, sorted.map(r => r.quickback_pct));
+}
+
+let trendChart;
+function initTrendChart() {
+  const ctx = document.getElementById("trendChart").getContext("2d");
+  trendChart = new Chart(ctx, {
+    type: "line",
+    data: { labels: [], datasets: [
+      { label: "Rage Click", data: [], borderColor: "#b04444", backgroundColor: "rgba(176,68,68,0.05)", tension: 0.3, fill: false, pointRadius: 2, pointHoverRadius: 5 },
+      { label: "Dead Click", data: [], borderColor: "#d97757", backgroundColor: "rgba(217,119,87,0.05)", tension: 0.3, fill: false, pointRadius: 2, pointHoverRadius: 5 },
+      { label: "Excessive Scroll", data: [], borderColor: "#c8a464", backgroundColor: "rgba(200,164,100,0.05)", tension: 0.3, fill: false, pointRadius: 2, pointHoverRadius: 5 },
+      { label: "Quick Back", data: [], borderColor: "#5b3d8a", backgroundColor: "rgba(91,61,138,0.05)", tension: 0.3, fill: false, pointRadius: 2, pointHoverRadius: 5 },
+    ] },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        y: { beginAtZero: true, grid: { color: "#f0f2f6" }, ticks: { font: { size: 11 }, callback: v => v + "%" } },
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+      },
+      plugins: { legend: { position: "top", labels: { boxWidth: 10, font: { size: 12 } } } },
+    },
+  });
+}
+function updateTrendChart(start, end) {
+  const sorted = dailyPctSeries(filterByDate(RAW.daily, start, end).sort((a, b) => a.date.localeCompare(b.date)));
+  trendChart.data.labels = sorted.map(r => r.date.slice(5));
+  trendChart.data.datasets[0].data = sorted.map(r => r.rage_pct);
+  trendChart.data.datasets[1].data = sorted.map(r => r.dead_pct);
+  trendChart.data.datasets[2].data = sorted.map(r => r.scroll_pct);
+  trendChart.data.datasets[3].data = sorted.map(r => r.quickback_pct);
+  trendChart.update();
+}
+
+function thresholdClass(val, metric) {
+  const t = THRESHOLDS[metric];
+  if (val >= t.red) return "threshold-red";
+  if (val >= t.yellow) return "threshold-yellow";
+  return "";
+}
+
+function updateDailyTable(start, end) {
+  const sorted = dailyPctSeries(filterByDate(RAW.daily, start, end).sort((a, b) => a.date.localeCompare(b.date)));
+  const cols = ["rage_pct", "dead_pct", "scroll_pct", "quickback_pct"];
+  const metricByCol = { rage_pct: "rage", dead_pct: "dead", scroll_pct: "scroll", quickback_pct: "quickback" };
+  const rankMap = {};
+  cols.forEach(c => {
+    const ranked = [...sorted].filter(r => r[c] > 0).sort((a, b) => b[c] - a[c]);
+    rankMap[c] = { 1: ranked[0]?.date, 2: ranked[1]?.date, 3: ranked[2]?.date };
+  });
+  function bad(c, date) {
+    if (rankMap[c][1] === date) return " bad-1";
+    if (rankMap[c][2] === date) return " bad-2";
+    if (rankMap[c][3] === date) return " bad-3";
+    return "";
+  }
+
+  document.getElementById("dailyTbody").innerHTML = sorted.length === 0
+    ? `<tr><td colspan="6" style="text-align:center; color:#9ca3af; padding:20px;">데이터 없음 — ETL 실행 필요</td></tr>`
+    : sorted.map(r => `
+      <tr>
+        <td>${r.date}</td>
+        <td>${fmtNum(r.sessions)}</td>
+        <td class="${thresholdClass(r.rage_pct, 'rage')}${bad('rage_pct', r.date)}">${fmtPct1(r.rage_pct)}</td>
+        <td class="${thresholdClass(r.dead_pct, 'dead')}${bad('dead_pct', r.date)}">${fmtPct1(r.dead_pct)}</td>
+        <td class="${thresholdClass(r.scroll_pct, 'scroll')}${bad('scroll_pct', r.date)}">${fmtPct1(r.scroll_pct)}</td>
+        <td class="${thresholdClass(r.quickback_pct, 'quickback')}${bad('quickback_pct', r.date)}">${fmtPct1(r.quickback_pct)}</td>
+      </tr>
+    `).join("");
+}
+
+function refresh() {
+  const start = document.getElementById("rangeStart").value;
+  const end = document.getElementById("rangeEnd").value;
+  document.getElementById("rangeInfo").textContent = `${start} ~ ${end} (${dateDiffDays(start, end)}일)`;
+  updateKpiCards(start, end);
+  updateTrendChart(start, end);
+  updateDailyTable(start, end);
+}
+
+document.querySelectorAll(".preset").forEach(btn => {
+  btn.addEventListener("click", () => {
+    const days = parseInt(btn.dataset.days, 10);
+    const end = DATE_MAX;
+    const start = days === 1 ? end : dateAddDays(end, -(days - 1));
+    const clampedStart = start < DATE_MIN ? DATE_MIN : start;
+    document.getElementById("rangeStart").value = clampedStart;
+    document.getElementById("rangeEnd").value = end;
+    document.querySelectorAll(".preset").forEach(b => b.classList.remove("active"));
+    btn.classList.add("active");
+    refresh();
+  });
+});
+document.getElementById("rangeStart").addEventListener("change", () => {
+  document.querySelectorAll(".preset").forEach(b => b.classList.remove("active"));
+  refresh();
+});
+document.getElementById("rangeEnd").addEventListener("change", () => {
+  document.querySelectorAll(".preset").forEach(b => b.classList.remove("active"));
+  refresh();
+});
+
+initTrendChart();
+sparkCharts.sessions = makeSpark("sparkSessions", "#3a8a6b");
+sparkCharts.rage = makeSpark("sparkRage", "#b04444");
+sparkCharts.dead = makeSpark("sparkDead", "#d97757");
+sparkCharts.scroll = makeSpark("sparkScroll", "#c8a464");
+sparkCharts.quickback = makeSpark("sparkQuickback", "#5b3d8a");
+refresh();
+</script>
+</body>
+</html>

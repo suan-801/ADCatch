@@ -1,0 +1,27 @@
+# AdCatch Development & Design Rules
+
+## 1. UI & Design Guidelines
+- **Theme & Aesthetic**: Minimalist, high-density B2B SaaS layout inspired by Linear and Vercel.
+- **Color Palette**: Slate & Neutral tones (`#0F172A`, `#1E293B`, `#F8FAFC`). Pure white backgrounds with subtle 1px border lines (`#E2E8F0`).
+- **Gradients & AI Artifacts**: Strictly FORBIDDEN to use generic AI blue/purple gradients, overly rounded corners, or decorative hero cards.
+- **Status Badges**:
+  - `New`: Muted Blue (`#3B82F6`)
+  - `Active`: Muted Green (`#22C55E`)
+  - `Inactive`: Muted Gray (`#64748B`)
+- **Pixel Assistant (Catcher)**:
+  - Render with CSS `image-rendering: pixelated;`.
+  - Positioned at the bottom-right of the viewport.
+  - Show contextual onboarding tooltips and daily change alerts.
+
+## 2. Architecture & Simplification
+- **Auth**: Authentication is bypassed in MVP. Use a default fallback user (`default_admin`) for all database operations.
+- **Auto-Pause (14-Day Inactivity)**:
+  - Update `users.last_accessed_at` on any user interaction or dashboard load.
+  - If `NOW() - last_accessed_at > 14 days`, scheduler skips collection for that project.
+- **Data Pruning**:
+  - Ads inactive for >14 consecutive days are archived from active tracking.
+
+## 3. Code Quality
+- Use Type Hints in Python (`pydantic`, `typing`).
+- Keep frontend components modular, tight, and high-density.
+- Prioritize clear tables, metrics cards, and grid galleries over narrative text.

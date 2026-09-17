@@ -1,0 +1,29 @@
+# 환경 변수 / 자격증명
+.env
+.env.local
+*.env
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node / Next.js
+node_modules/
+apps/web/.next/
+apps/web/out/
+next-env.d.ts
+
+# OS / 에디터
+.DS_Store
+.vscode/
+.idea/
+
+# reference/marketing-os-course — 강의 실습 중 실제로 수집된 제3자 광고 이미지/영상 원본
+# (245MB+, 코드 패턴 참고 목적과 무관한 스크래핑 결과물이라 버전관리 대상에서 제외)
+reference/marketing-os-course/**/ad-creatives/
+reference/marketing-os-course/**/dashboard/media/
+reference/marketing-os-course/02_competitor/dashboard/
+reference/marketing-os-course/.playwright-mcp/
