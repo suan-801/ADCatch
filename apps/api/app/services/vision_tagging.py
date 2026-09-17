@@ -72,15 +72,3 @@ def analyze_visual_type(image_bytes: bytes, mime_type: str = "image/jpeg") -> Vi
         return VisualType(parsed["visual_type"])
     except (KeyError, IndexError, ValueError, json.JSONDecodeError):
         return None
-
-
-def fetch_and_tag_image_url(image_url: str) -> VisualType | None:
-    """이미지 URL을 다운로드해 비전 태깅까지 한 번에 수행한다."""
-    try:
-        resp = httpx.get(image_url, timeout=30)
-        resp.raise_for_status()
-    except httpx.HTTPError:
-        return None
-
-    content_type = resp.headers.get("content-type", "image/jpeg")
-    return analyze_visual_type(resp.content, mime_type=content_type)

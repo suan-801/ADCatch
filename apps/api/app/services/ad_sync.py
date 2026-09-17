@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Ad
 from app.schemas import AdStatus, RawAdItem, SyncResult
-from app.services import vision_tagging
+from app.services import media
 
 
 def synchronize_ad_status(
@@ -46,9 +46,11 @@ def synchronize_ad_status(
     for ad_archive_id, item in fetched_by_archive_id.items():
         existing = existing_by_archive_id.get(ad_archive_id)
         if existing is None:
+            image_url = item.image_url
             visual_type = None
             if tag_visual and item.image_url:
-                visual_type = vision_tagging.fetch_and_tag_image_url(item.image_url)
+                # 다운로드 1회로 Supabase Storage 캐싱 + Gemini Vision 태깅을 함께 수행 (PRD 3.3/4장)
+                image_url, visual_type = media.process_ad_image(competitor_id, ad_archive_id, item.image_url)
             db.add(
                 Ad(
                     competitor_id=competitor_id,
@@ -56,7 +58,7 @@ def synchronize_ad_status(
                     status=AdStatus.NEW.value,
                     visual_type=visual_type.value if visual_type else None,
                     format=item.format.value,
-                    image_url=item.image_url,
+                    image_url=image_url,
                     copy_text=item.copy_text,
                     cta_text=item.cta_text,
                     first_seen_at=now,
