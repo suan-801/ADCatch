@@ -1,0 +1,40 @@
+name: ADCatcher CI
+
+# P0-12: push/PR마다 백엔드 회귀 테스트 + 프론트엔드 빌드를 실행한다.
+# 실제 Supabase/Apify/Gemini 자격증명 없이도 동작해야 하므로, 백엔드 테스트는 SQLite
+# 인메모리 DB로 돈다 (apps/api/tests/conftest.py 참고 — Postgres 기동이 필요 없음).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest -v
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build

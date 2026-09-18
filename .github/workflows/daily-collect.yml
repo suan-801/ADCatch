@@ -1,4 +1,4 @@
-name: AdCatch Daily Collection
+name: ADCatcher Daily Collection
 
 on:
   schedule:

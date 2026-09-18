@@ -29,7 +29,9 @@ class Project(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="ACTIVE")  # ACTIVE | PAUSED
-    auto_collect_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 새 프로젝트는 명시적 opt-in 전까지 자동 수집하지 않는다 (2026-09, Baseline+Opt-in UX).
+    # 기존 row는 마이그레이션하지 않는다 — 이 default는 신규 INSERT에만 적용된다.
+    auto_collect_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="projects")
@@ -61,6 +63,9 @@ class Ad(Base):
     ad_archive_id: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # 수집기가 파싱한 Meta 소재상의 실제 집행 시작일 (모르면 NULL) — ADCatcher가 "처음 관측한"
+    # first_seen_at과는 별개 개념이다 (P0-06). UI는 이 값이 있으면 "집행 N일", 없으면 "추적 N일".
+    source_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="NEW")  # NEW | ACTIVE | INACTIVE
     visual_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
     format: Mapped[str | None] = mapped_column(String(20), nullable=True)  # IMAGE | VIDEO | CAROUSEL
@@ -70,6 +75,12 @@ class Ad(Base):
     consecutive_inactive_days: Mapped[int] = mapped_column(Integer, default=0)
     # PRD 3.3: INACTIVE 전환 후 14일 연속 미노출 시 수집 대상에서 아카이빙.
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Gemini/썸네일 캐싱(enrichment)은 수집(core data)과 완전히 분리된 상태로 추적한다 (P0-07).
+    # 분석이 실패해도 ads row 자체는 항상 정상 생성/유지된다.
+    analysis_status: Mapped[str] = mapped_column(String(20), default="PENDING")  # PENDING | SUCCESS | FAILED
+    analysis_retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    analysis_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     competitor: Mapped["Competitor"] = relationship(back_populates="ads")
@@ -94,7 +105,9 @@ class CollectionRun(Base):
     # KST(Asia/Seoul) 캘린더 날짜로 시작 시점에 고정 — 날짜별 조회를 TIMESTAMPTZ→DATE 변환 없이
     # 단순 동등비교로 처리하기 위함 (app.services.collection_history.today_kst).
     run_date: Mapped[date] = mapped_column(Date, nullable=False)
-    status: Mapped[str] = mapped_column(String(20), default="RUNNING")  # RUNNING | SUCCESS | FAILED
+    # PARTIAL = fetch 자체는 성공했지만 max_ads 상한에 도달해 전체 스냅샷을 보장할 수 없음 (P0-02).
+    # PARTIAL인 run은 STOPPED 판정에 절대 사용되지 않는다.
+    status: Mapped[str] = mapped_column(String(20), default="RUNNING")  # RUNNING | SUCCESS | PARTIAL | FAILED
     fetched_ads_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

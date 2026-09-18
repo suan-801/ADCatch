@@ -48,6 +48,13 @@ class ProjectCreate(BaseModel):
     name: str
 
 
+class ProjectUpdate(BaseModel):
+    """현재는 auto_collect_enabled 토글 전용 (Baseline opt-in CTA / Project Header 설정).
+    부분 업데이트이므로 전달된 필드만 반영한다."""
+
+    auto_collect_enabled: bool | None = None
+
+
 class ProjectOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -90,6 +97,8 @@ class AdOut(BaseModel):
     cta_text: str | None
     first_seen_at: datetime
     last_seen_at: datetime
+    # 소재상의 실제 집행 시작일 (P0-06). ADCatcher가 처음 관측한 first_seen_at과는 다른 개념.
+    source_started_at: datetime | None
     consecutive_inactive_days: int
     is_archived: bool
 
@@ -112,6 +121,11 @@ class SyncResult(BaseModel):
     reactivated_or_kept_active: int
     newly_inactive: int
     newly_archived: int
+    # Baseline + Daily Catch Opt-in UX: 이 수집이 해당 경쟁사의 "첫 성공 수집"이었는지, 그리고
+    # snapshot이 완전했는지(=STOPPED 판정 신뢰 가능한지). 프론트는 is_baseline && snapshot_complete
+    # 일 때만 Baseline CTA를 보여준다 (§25 — 실패/부분 수집 결과는 기준점으로 삼지 않음).
+    is_baseline: bool
+    snapshot_complete: bool
 
 
 # ── Daily Ad Change History (additive) ─────────────────────────────────────
@@ -120,10 +134,14 @@ class AdChangeEventType(str, Enum):
     STARTED = "STARTED"
     STOPPED = "STOPPED"
     REACTIVATED = "REACTIVATED"
+    # 경쟁사 등록 후 첫 성공 수집에서 발견된 기존 집행 소재 (P0-03) — "오늘 켠 광고"가 아니라
+    # "처음 확인한 현재 집행 목록"이므로 Daily Changes의 켠/끈 광고 집계에서 제외된다.
+    BASELINE_DISCOVERED = "BASELINE_DISCOVERED"
 
 
 class CollectionStatus(str, Enum):
     SUCCESS = "SUCCESS"
+    PARTIAL = "PARTIAL"
     FAILED = "FAILED"
     NO_RECORD = "NO_RECORD"
 
@@ -145,6 +163,7 @@ class ChangedAdOut(BaseModel):
     cta_text: str | None
     first_seen_at: datetime
     last_seen_at: datetime
+    source_started_at: datetime | None
     consecutive_inactive_days: int
     is_archived: bool
     event_type: AdChangeEventType
@@ -163,8 +182,21 @@ class AdChangesResponse(BaseModel):
     competitor_id: uuid.UUID | None
     collection_status: CollectionStatus
     history_available_from: date | None
+    # 이 날짜가 경쟁사 등록 직후의 baseline 수집일이면 > 0 (P0-03). summary의 started/reactivated와는
+    # 별개로 집계되며, 프론트는 이 값이 있을 때 "오늘 N개를 켰어요"가 아니라 "N개를 처음 확인했어요"로 표기한다.
+    baseline_discovered_count: int
     summary: AdChangeSummary
     started_ads: list[ChangedAdOut]
     reactivated_ads: list[ChangedAdOut]
     stopped_ads: list[ChangedAdOut]
     visual_pattern: dict[str, int]
+
+
+class CollectionFreshness(BaseModel):
+    """프로젝트 헤더 근처에 표시할 '이 데이터를 믿어도 되는가' 요약 (P0-09)."""
+
+    project_id: uuid.UUID
+    latest_run_at: datetime | None
+    total_competitors: int
+    healthy_competitors: int
+    failed_competitor_names: list[str]

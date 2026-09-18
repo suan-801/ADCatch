@@ -1,4 +1,4 @@
-# AdCatch (애드캐치)
+# ADCatcher (애드캐처)
 
 경쟁사의 Meta Ad Library 라이브 소재를 매일 자동 수집해 신규/종료 감지, 생존 기간, 비주얼 패턴 분석 등
 **Fact 기반 데이터**를 제공하는 경쟁사 인텔리전스 웹 서비스. 자세한 제품 요구사항은 [`PRD.MD`](./PRD.MD) 참고.
@@ -60,7 +60,7 @@ npm run dev
 
 Meta Ad Library 스크래핑은 Apify의 `curious_coder/facebook-ads-library-scraper` 액터를 사용합니다
 (`apps/api/app/services/ad_library_collector.py`). 이 호출 패턴은 `reference/marketing-os-course/`에서
-검증된 코드를 이식한 것이며, 신규/종료(NEW/ACTIVE/INACTIVE) 상태 추적 로직은 AdCatch에서 새로 구현했습니다
+검증된 코드를 이식한 것이며, 신규/종료(NEW/ACTIVE/INACTIVE) 상태 추적 로직은 ADCatcher에서 새로 구현했습니다
 (`apps/api/app/services/ad_sync.py`).
 
 ## 스케줄러

@@ -21,7 +21,7 @@ export function WhatItDoesSection() {
           오늘도 조용히 바뀌고 있어요
         </h2>
         <p className="mt-4 max-w-md text-sm text-muted sm:text-base">
-          새로 투입되는 소재, 조용히 사라지는 소재. ADCather가 매일 그 변화를 대신 지켜보고 캐치해드려요.
+          새로 투입되는 소재, 조용히 사라지는 소재. ADCatcher가 매일 그 변화를 대신 지켜보고 캐치해드려요.
         </p>
 
         <div className="relative mt-16 grid w-full max-w-lg grid-cols-4 gap-3 sm:gap-4">

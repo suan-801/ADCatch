@@ -25,6 +25,7 @@ from app.schemas import (
     AdChangesResponse,
     AdChangeSummary,
     ChangedAdOut,
+    CollectionFreshness,
     CollectionStatus,
 )
 
@@ -86,6 +87,13 @@ def complete_collection_run_success(db: Session, run: CollectionRun, fetched_ads
     run.fetched_ads_count = fetched_ads_count
 
 
+def complete_collection_run_partial(db: Session, run: CollectionRun, fetched_ads_count: int) -> None:
+    """P0-02: max_ads 상한에 도달해 스냅샷이 잘렸을 수 있는 경우. STOPPED 판정에는 사용되지 않는다."""
+    run.status = "PARTIAL"
+    run.completed_at = datetime.now(timezone.utc)
+    run.fetched_ads_count = fetched_ads_count
+
+
 def _competitor_ids_for_scope(db: Session, project_id: uuid.UUID, competitor_id: uuid.UUID | None) -> list[uuid.UUID]:
     if competitor_id is not None:
         return [competitor_id]
@@ -112,6 +120,7 @@ def get_ad_changes(
             competitor_id=competitor_id,
             collection_status=CollectionStatus.NO_RECORD,
             history_available_from=None,
+            baseline_discovered_count=0,
             summary=AdChangeSummary(started=0, reactivated=0, stopped=0),
             started_ads=[],
             reactivated_ads=[],
@@ -119,7 +128,8 @@ def get_ad_changes(
             visual_pattern={},
         )
 
-    # 1) 이 날짜의 수집 상태 (성공/실패/기록없음) — backend에서 날짜 필터링 처리.
+    # 1) 이 날짜의 수집 상태 (성공/부분성공/실패/기록없음) — backend에서 날짜 필터링 처리.
+    # SUCCESS가 하나라도 있으면 SUCCESS로, 아니면 PARTIAL, 아니면 FAILED 순으로 우선한다.
     runs_today = db.scalars(
         select(CollectionRun).where(
             CollectionRun.competitor_id.in_(competitor_ids),
@@ -128,6 +138,8 @@ def get_ad_changes(
     ).all()
     if any(r.status == "SUCCESS" for r in runs_today):
         collection_status = CollectionStatus.SUCCESS
+    elif any(r.status == "PARTIAL" for r in runs_today):
+        collection_status = CollectionStatus.PARTIAL
     elif any(r.status == "FAILED" for r in runs_today):
         collection_status = CollectionStatus.FAILED
     else:
@@ -152,9 +164,15 @@ def get_ad_changes(
     started: list[ChangedAdOut] = []
     reactivated: list[ChangedAdOut] = []
     stopped: list[ChangedAdOut] = []
+    baseline_count = 0
     visual_counter: Counter[str] = Counter()
 
     for event, ad, competitor_name in rows:
+        # P0-03: baseline은 "오늘 켠 광고"가 아니므로 켠/끈 집계 및 visual pattern에서 제외한다.
+        if event.event_type == AdChangeEventType.BASELINE_DISCOVERED.value:
+            baseline_count += 1
+            continue
+
         changed = ChangedAdOut(
             id=ad.id,
             competitor_id=ad.competitor_id,
@@ -167,6 +185,7 @@ def get_ad_changes(
             cta_text=ad.cta_text,
             first_seen_at=ad.first_seen_at,
             last_seen_at=ad.last_seen_at,
+            source_started_at=ad.source_started_at,
             consecutive_inactive_days=ad.consecutive_inactive_days,
             is_archived=ad.is_archived,
             event_type=event.event_type,
@@ -189,9 +208,47 @@ def get_ad_changes(
         competitor_id=competitor_id,
         collection_status=collection_status,
         history_available_from=history_available_from,
+        baseline_discovered_count=baseline_count,
         summary=AdChangeSummary(started=len(started), reactivated=len(reactivated), stopped=len(stopped)),
         started_ads=started,
         reactivated_ads=reactivated,
         stopped_ads=stopped,
         visual_pattern=dict(visual_counter),
+    )
+
+
+def get_freshness_summary(db: Session, project_id: uuid.UUID) -> CollectionFreshness:
+    """P0-09: 프로젝트 헤더 근처에 표시할 데이터 신뢰도 요약 — 각 경쟁사의 "가장 최근" 수집
+    시도만 보고 판단한다 (오래된 실패 이력이 최신 성공을 가리지 않도록)."""
+    competitors = db.scalars(
+        select(Competitor).where(Competitor.project_id == project_id, Competitor.is_own_brand.is_(False))
+    ).all()
+
+    latest_run_at: datetime | None = None
+    healthy = 0
+    failed_names: list[str] = []
+
+    for c in competitors:
+        latest_run = db.scalar(
+            select(CollectionRun)
+            .where(CollectionRun.competitor_id == c.id)
+            .order_by(CollectionRun.started_at.desc())
+            .limit(1)
+        )
+        if latest_run is None:
+            failed_names.append(c.name)
+            continue
+        if latest_run.completed_at and (latest_run_at is None or latest_run.completed_at > latest_run_at):
+            latest_run_at = latest_run.completed_at
+        if latest_run.status in ("SUCCESS", "PARTIAL"):
+            healthy += 1
+        else:
+            failed_names.append(c.name)
+
+    return CollectionFreshness(
+        project_id=project_id,
+        latest_run_at=latest_run_at,
+        total_competitors=len(competitors),
+        healthy_competitors=healthy,
+        failed_competitor_names=failed_names,
     )

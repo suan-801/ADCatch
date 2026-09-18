@@ -2,14 +2,17 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+from app.config import settings
 from app.database import Base, engine
 from app.routers import ad_changes, ads, competitors, dashboard, projects
 
-app = FastAPI(title="AdCatch API", version="0.1.0")
+app = FastAPI(title="ADCatcher API", version="0.1.0")
 
+# P0-11: 허용 origin을 환경변수(CORS_ALLOWED_ORIGINS, 콤마 구분)로 설정 — 로컬 기본값은
+# 기존과 동일하게 http://localhost:3000 하나만 유지된다.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=settings.cors_allowed_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

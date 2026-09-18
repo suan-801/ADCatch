@@ -1,4 +1,4 @@
--- Schema for AdCatch (PostgreSQL / Supabase)
+-- Schema for ADCatcher (PostgreSQL / Supabase)
 
 -- 1. Users Table (Bypassed auth for MVP using default admin)
 CREATE TABLE IF NOT EXISTS users (
@@ -18,7 +18,9 @@ CREATE TABLE IF NOT EXISTS projects (
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
     status VARCHAR(20) DEFAULT 'ACTIVE', -- 'ACTIVE', 'PAUSED'
-    auto_collect_enabled BOOLEAN DEFAULT TRUE,
+    -- 새 프로젝트는 명시적 opt-in(Baseline CTA) 전까지 자동 수집하지 않는다.
+    -- 기존 row에는 영향 없음 (DEFAULT는 신규 INSERT에만 적용됨).
+    auto_collect_enabled BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -24,9 +24,9 @@ def _build_message_card(project_name: str, results: list[SyncResult], top_surviv
     return {
         "@type": "MessageCard",
         "@context": "http://schema.org/extensible-card",
-        "summary": f"AdCatch 일일 수집 요약 — {project_name}",
+        "summary": f"ADCatcher 일일 수집 요약 — {project_name}",
         "themeColor": "0F172A",
-        "title": f"📦 AdCatch — {project_name} 일일 수집 완료",
+        "title": f"📦 ADCatcher — {project_name} 일일 수집 완료",
         "sections": [{"facts": facts, "markdown": True}],
     }
 

@@ -1,4 +1,4 @@
-import type { Ad, AdChangesResponse, Competitor, DashboardMetrics, Project } from "./types";
+import type { Ad, AdChangesResponse, Competitor, CollectionFreshness, DashboardMetrics, Project, SyncResult } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -17,6 +17,10 @@ export const api = {
   listProjects: () => request<Project[]>("/projects"),
   createProject: (name: string) =>
     request<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) }),
+  updateProject: (projectId: string, payload: { auto_collect_enabled?: boolean }) =>
+    request<Project>(`/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+
+  getProject: (projectId: string) => request<Project>(`/projects/${projectId}`),
 
   listCompetitors: (projectId: string) =>
     request<Competitor[]>(`/projects/${projectId}/competitors`),
@@ -28,10 +32,12 @@ export const api = {
 
   getDashboard: (projectId: string) =>
     request<DashboardMetrics>(`/projects/${projectId}/dashboard`),
+  getFreshness: (projectId: string) =>
+    request<CollectionFreshness>(`/projects/${projectId}/dashboard/freshness`),
 
   listAds: (competitorId: string) => request<Ad[]>(`/competitors/${competitorId}/ads`),
   collectNow: (competitorId: string) =>
-    request(`/competitors/${competitorId}/ads/collect`, { method: "POST" }),
+    request<SyncResult>(`/competitors/${competitorId}/ads/collect`, { method: "POST" }),
 
   getAdChanges: (projectId: string, params: { date: string; competitorId?: string }) => {
     const qs = new URLSearchParams({ date: params.date });

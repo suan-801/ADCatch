@@ -41,7 +41,7 @@ export function ProjectSidebar({
   const body = (
     <>
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src="/brand/logo.png" alt="ADCather" className="h-6 w-auto" />
+      <img src="/brand/logo.png" alt="ADCatcher" className="h-6 w-auto" />
       <Link href="/" className="mt-4 flex items-center gap-2 text-xs font-medium text-muted hover:text-brand-dark">
         <span aria-hidden>←</span> 홈으로
       </Link>

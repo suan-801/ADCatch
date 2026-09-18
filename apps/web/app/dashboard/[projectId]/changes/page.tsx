@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { AdChangesResponse, Competitor } from "@/lib/types";
+import { todayKst } from "@/lib/types";
 import { DateNav } from "@/components/daily-changes/date-nav";
 import { CompetitorFilter } from "@/components/daily-changes/competitor-filter";
 import { DailySummary } from "@/components/daily-changes/daily-summary";
@@ -11,20 +12,19 @@ import { ChangedAdSection } from "@/components/daily-changes/changed-ad-section"
 import { VisualFormatChart } from "@/components/visual-format-chart";
 import { MascotWidget } from "@/components/mascot-widget";
 
-function todayKst(): string {
-  // 서버(app/services/collection_history.py)와 동일하게 KST 캘린더 날짜를 기본값으로 사용한다.
-  const kst = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  return kst.toISOString().slice(0, 10);
-}
-
 // 브리핑 §35: 빈 상태 3종을 서로 다른 문구로 명확히 구분한다.
+// P0-03: baseline 수집일은 "오늘 켠 광고"가 아니라 "처음 확인한 현재 집행 목록"으로 별도 안내한다.
 function emptyStateMessage(result: AdChangesResponse): string | null {
   const hasChanges = result.summary.started + result.summary.reactivated + result.summary.stopped > 0;
   if (hasChanges) return null;
+  if (result.baseline_discovered_count > 0) {
+    return `현재 집행 중인 광고 ${result.baseline_discovered_count}개를 처음 확인했어요.`;
+  }
   if (!result.history_available_from || result.date < result.history_available_from) {
     return "이 날짜는 추적 기능 적용 이전이라 광고 변화 기록을 제공하지 않아요.";
   }
   if (result.collection_status === "SUCCESS") return "이날은 광고 변화가 없었어요.";
+  if (result.collection_status === "PARTIAL") return "이날은 일부 소재만 수집돼 변화 정보가 아직 없어요.";
   return "이 날짜에는 정상적인 수집 기록이 없습니다.";
 }
 
@@ -82,6 +82,12 @@ export default function DailyChangesPage() {
       {result && (
         <>
           <DailySummary competitorLabel={competitorLabel} date={date} summary={result.summary} />
+
+          {result.collection_status === "PARTIAL" && (result.summary.started + result.summary.reactivated) > 0 && (
+            <p className="rounded-xl border border-brand/30 bg-brand-cream p-3 text-xs text-brand-dark">
+              이날 수집은 일부만 완료됐어요 — &quot;끈 광고&quot; 수치는 이 날짜엔 집계되지 않았을 수 있어요.
+            </p>
+          )}
 
           {message ? (
             <p className="rounded-2xl border border-dashed border-border p-10 text-center text-sm text-muted">

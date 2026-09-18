@@ -3,7 +3,7 @@
 Gemini REST 호출/재시도/쿼터 예외 처리 패턴은
 reference/marketing-os-course/02_competitor/_scripts/fetch_competitor_ads.py 의
 gemini_analyze_image() 를 참고했다. 다만 그 레퍼런스는 USP 3항목 + ad_pattern 등
-카피라이팅용 5단계 분석까지 하는 무거운 프롬프트였고, AdCatch(PRD 4장)는
+카피라이팅용 5단계 분석까지 하는 무거운 프롬프트였고, ADCatcher(PRD 4장)는
 "인물 포함 / 텍스트 중심 / 제품 중심 / 그래픽" 4분류만 필요하므로 프롬프트와
 JSON 스키마를 그 범위로 축소했다.
 """

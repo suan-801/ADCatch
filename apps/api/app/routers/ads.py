@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import Ad, Competitor, User
@@ -56,6 +57,7 @@ def collect_now(
         fetched = fetch_live_ads(
             competitor.ad_library_url,
             page_id=competitor.page_id or "",
+            max_ads=settings.apify_max_ads,
         )
     except httpx.HTTPStatusError as e:
         collection_history.fail_collection_run(db, run, str(e))
@@ -67,4 +69,6 @@ def collect_now(
         collection_history.fail_collection_run(db, run, str(e))
         raise HTTPException(status_code=502, detail=f"수집 실패: {e}") from e
 
-    return synchronize_ad_status(db, competitor_id, fetched, run)
+    # P0-02: 상한에 도달했다면(=더 있을 수 있음) 이 스냅샷은 불완전한 것으로 간주한다.
+    snapshot_complete = len(fetched) < settings.apify_max_ads
+    return synchronize_ad_status(db, competitor_id, fetched, run, snapshot_complete=snapshot_complete)

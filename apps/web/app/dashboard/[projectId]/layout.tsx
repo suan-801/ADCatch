@@ -6,6 +6,9 @@ import { usePathname, useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { Project } from "@/lib/types";
 import { ProjectSidebar } from "@/components/project-sidebar";
+import { CollectionFreshnessBadge } from "@/components/collection-freshness";
+import { AutoCatchToggle } from "@/components/auto-catch-toggle";
+import { ProjectContext } from "@/lib/project-context";
 
 // 브리핑 §20/§21: Project 내부를 "현재 현황" / "날짜별 변화" 두 관점으로 나누는 공용 셸.
 // 사이드바 + 프로젝트 헤더 + 서브내비를 여기서 한 번만 렌더링하고, 두 페이지는 콘텐츠만 채운다.
@@ -30,7 +33,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     router.push(`/dashboard/${project.id}`);
   };
 
+  const handleToggleAutoCollect = async (enabled: boolean) => {
+    const updated = await api.updateProject(projectId, { auto_collect_enabled: enabled });
+    setProjects((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+  };
+
   return (
+    <ProjectContext.Provider value={{ project: currentProject ?? null, updateAutoCollect: handleToggleAutoCollect }}>
     <div className="flex min-h-screen bg-background">
       <ProjectSidebar
         projects={projects}
@@ -58,9 +67,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <div className="min-w-0">
             <h1 className="truncate text-xl font-extrabold text-foreground">{currentProject?.name ?? " "}</h1>
             <p className="text-xs text-muted">경쟁사 광고 현황</p>
+            {projectId && (
+              <div className="mt-1.5">
+                <CollectionFreshnessBadge projectId={projectId} />
+              </div>
+            )}
           </div>
 
-          <nav className="ml-auto flex gap-1 rounded-full bg-slate-100 p-1 text-xs font-semibold">
+          <div className="ml-auto flex items-center gap-3">
+            {currentProject && <AutoCatchToggle project={currentProject} onToggle={handleToggleAutoCollect} />}
+
+            <nav className="flex gap-1 rounded-full bg-slate-100 p-1 text-xs font-semibold">
             <Link
               href={`/dashboard/${projectId}`}
               className={`rounded-full px-4 py-1.5 transition-colors ${
@@ -77,11 +94,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             >
               날짜별 변화
             </Link>
-          </nav>
+            </nav>
+          </div>
         </header>
 
         <main className="p-6 sm:p-8">{children}</main>
       </div>
     </div>
+    </ProjectContext.Provider>
   );
 }

@@ -18,8 +18,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import httpx
 from sqlalchemy import select
 
+from app.config import settings
 from app.database import SessionLocal
 from app.models import Competitor, Project
 from app.services import collection_history, teams_alert
@@ -36,7 +38,13 @@ def run() -> None:
             print(f"[auto-pause] 14일 미접속으로 스킵된 프로젝트 {len(skipped)}개: "
                   f"{[p.name for p in skipped]}")
 
-        active_projects = db.scalars(select(Project).where(Project.status == "ACTIVE")).all()
+        # Baseline + Daily Catch Opt-in UX §5: status==ACTIVE 만으로는 부족하다 — 사용자가 명시적으로
+        # 자동 추적을 켠(auto_collect_enabled=True) 프로젝트만 스케줄러가 건드린다. (auto_pause가
+        # 이미 auto_collect_enabled를 반영해 status를 PAUSED로 내리긴 하지만, 두 개념을 혼동하지
+        # 않도록 여기서도 명시적으로 다시 확인한다.)
+        active_projects = db.scalars(
+            select(Project).where(Project.status == "ACTIVE", Project.auto_collect_enabled.is_(True))
+        ).all()
         for project in active_projects:
             results = []
             competitors = db.scalars(
@@ -45,13 +53,21 @@ def run() -> None:
             for competitor in competitors:
                 run = collection_history.start_collection_run(db, competitor.id)
                 try:
-                    fetched = fetch_live_ads(competitor.ad_library_url, page_id=competitor.page_id or "")
-                    result = synchronize_ad_status(db, competitor.id, fetched, run)
+                    fetched = fetch_live_ads(
+                        competitor.ad_library_url,
+                        page_id=competitor.page_id or "",
+                        max_ads=settings.apify_max_ads,
+                    )
+                    snapshot_complete = len(fetched) < settings.apify_max_ads
+                    result = synchronize_ad_status(
+                        db, competitor.id, fetched, run, snapshot_complete=snapshot_complete
+                    )
                     results.append(result)
-                    print(f"[{project.name}/{competitor.name}] "
+                    status_label = "SUCCESS" if snapshot_complete else "PARTIAL(상한 도달, STOPPED 판정 보류)"
+                    print(f"[{project.name}/{competitor.name}] {status_label} "
                           f"신규={result.new_ads} 유지={result.reactivated_or_kept_active} "
                           f"종료={result.newly_inactive} 아카이빙={result.newly_archived}")
-                except ApifyRunError as e:
+                except (ApifyRunError, httpx.HTTPError) as e:
                     collection_history.fail_collection_run(db, run, str(e))
                     print(f"[{project.name}/{competitor.name}] 수집 실패: {e}")
 

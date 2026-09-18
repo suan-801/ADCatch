@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import Ad, Competitor, Project, User
-from app.schemas import AdStatus, DashboardMetrics
+from app.schemas import AdStatus, CollectionFreshness, DashboardMetrics
+from app.services.collection_history import get_freshness_summary
 
 router = APIRouter(prefix="/projects/{project_id}/dashboard", tags=["dashboard"])
 
@@ -45,3 +46,17 @@ def get_dashboard(
         inactive_count=status_counts.get(AdStatus.INACTIVE.value, 0),
         visual_type_ratio=dict(visual_counts),
     )
+
+
+@router.get("/freshness", response_model=CollectionFreshness)
+def get_dashboard_freshness(
+    project_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """P0-09 — '이 데이터를 믿어도 되는가' 요약 (최신 수집 시각, N/N 경쟁사 정상)."""
+    project = db.get(Project, project_id)
+    if project is None or project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return get_freshness_summary(db, project_id)

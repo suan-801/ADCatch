@@ -1,12 +1,15 @@
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import type { ChangedAd } from "@/lib/types";
-import { survivalDays } from "@/lib/types";
+import { runningDays } from "@/lib/types";
 
 const EVENT_BADGE: Record<ChangedAd["event_type"], { label: string; className: string }> = {
   STARTED: { label: "NEW", className: "bg-blue-50 text-status-new border border-status-new/30" },
   REACTIVATED: { label: "REACTIVATED", className: "bg-green-50 text-status-active border border-status-active/30" },
   STOPPED: { label: "종료", className: "bg-slate-100 text-status-inactive border border-status-inactive/30" },
+  // 백엔드가 baseline 이벤트는 켠/끈 목록에서 걸러주므로 실제로는 렌더링되지 않지만,
+  // 타입 완전성을 위해 배지 스타일을 정의해둔다.
+  BASELINE_DISCOVERED: { label: "기존 집행", className: "bg-slate-100 text-muted border border-border" },
 };
 
 // 브리핑 §32/§33: 기존 Ad Card(ad-gallery.tsx)와 동일한 이미지 우선 카드 구조를 공유하되,
@@ -16,6 +19,7 @@ const EVENT_BADGE: Record<ChangedAd["event_type"], { label: string; className: s
 export function ChangedAdCard({ ad }: { ad: ChangedAd }) {
   const { projectId } = useParams<{ projectId: string }>();
   const badge = EVENT_BADGE[ad.event_type];
+  const running = runningDays(ad);
 
   return (
     <Link
@@ -34,8 +38,8 @@ export function ChangedAdCard({ ad }: { ad: ChangedAd }) {
           <span className="text-xs text-muted">{ad.format ?? "미디어 없음"}</span>
         )}
         <div className="absolute right-2 top-2 rounded-xl bg-foreground/80 px-2.5 py-1.5 text-right text-white backdrop-blur-sm">
-          <p className="text-lg font-extrabold leading-none tabular-nums">{survivalDays(ad)}</p>
-          <p className="text-[9px] font-semibold uppercase tracking-wide text-white/70">days</p>
+          <p className="text-lg font-extrabold leading-none tabular-nums">{running.days}</p>
+          <p className="text-[9px] font-semibold uppercase tracking-wide text-white/70">{running.label}</p>
         </div>
       </div>
       <div className="space-y-2 p-4">
