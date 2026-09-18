@@ -58,3 +58,50 @@ CREATE TABLE IF NOT EXISTS ads (
 CREATE INDEX IF NOT EXISTS idx_ads_competitor ON ads(competitor_id);
 CREATE INDEX IF NOT EXISTS idx_ads_status ON ads(status);
 CREATE INDEX IF NOT EXISTS idx_ads_archive_id ON ads(ad_archive_id);
+
+-- ── Daily Ad Change History (additive, 2026-09) ─────────────────────────
+-- ads 테이블은 "현재 상태"만 담당한다. 아래 3개 테이블이 수집 실행 기록 / 관측 증거 /
+-- 상태 변화 이력을 각각 분리해서 담당한다. 기존 테이블 컬럼은 변경하지 않는다.
+
+-- 5. Collection Runs — 경쟁사 1곳에 대한 수집 시도 1회 (성공/실패 명시적 기록)
+CREATE TABLE IF NOT EXISTS collection_runs (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    competitor_id UUID REFERENCES competitors(id) ON DELETE CASCADE,
+    started_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    completed_at TIMESTAMPTZ,
+    run_date DATE NOT NULL, -- KST(Asia/Seoul) 캘린더 날짜로 시작 시점에 고정
+    status VARCHAR(20) NOT NULL DEFAULT 'RUNNING', -- 'RUNNING', 'SUCCESS', 'FAILED'
+    fetched_ads_count INT,
+    error_message TEXT,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. Ad Observations — SUCCESS인 run에서 실제로 발견된 광고 (스냅샷 비교의 근거)
+CREATE TABLE IF NOT EXISTS ad_observations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    collection_run_id UUID REFERENCES collection_runs(id) ON DELETE CASCADE,
+    competitor_id UUID REFERENCES competitors(id) ON DELETE CASCADE,
+    ad_id UUID REFERENCES ads(id) ON DELETE CASCADE,
+    observed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 7. Ad Status Events — 상태 "전환이 발생한 순간"에만 1건 생성 (반복 기록 금지)
+-- event_date는 KST(Asia/Seoul) 기준 캘린더 날짜로 고정 저장 (UTC 경계로 하루 밀림 방지)
+CREATE TABLE IF NOT EXISTS ad_status_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    ad_id UUID REFERENCES ads(id) ON DELETE CASCADE,
+    competitor_id UUID REFERENCES competitors(id) ON DELETE CASCADE,
+    collection_run_id UUID REFERENCES collection_runs(id) ON DELETE CASCADE,
+    event_type VARCHAR(20) NOT NULL, -- 'STARTED', 'STOPPED', 'REACTIVATED'
+    event_date DATE NOT NULL,
+    previous_status VARCHAR(20),
+    new_status VARCHAR(20) NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_collection_runs_competitor ON collection_runs(competitor_id, run_date, status);
+CREATE INDEX IF NOT EXISTS idx_ad_observations_run ON ad_observations(collection_run_id);
+CREATE INDEX IF NOT EXISTS idx_ad_observations_competitor_ad ON ad_observations(competitor_id, ad_id);
+CREATE INDEX IF NOT EXISTS idx_ad_status_events_competitor_date ON ad_status_events(competitor_id, event_date);
+CREATE INDEX IF NOT EXISTS idx_ad_status_events_ad ON ad_status_events(ad_id);

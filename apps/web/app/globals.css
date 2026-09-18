@@ -2,9 +2,41 @@
 @tailwind components;
 @tailwind utilities;
 
+@font-face {
+  font-family: "Freesentation";
+  src: url("/fonts/Freesentation/Freesentation-4Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Freesentation";
+  src: url("/fonts/Freesentation/Freesentation-5Medium.woff2") format("woff2");
+  font-weight: 500;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Freesentation";
+  src: url("/fonts/Freesentation/Freesentation-6SemiBold.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Freesentation";
+  src: url("/fonts/Freesentation/Freesentation-7Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Freesentation";
+  src: url("/fonts/Freesentation/Freesentation-8ExtraBold.woff2") format("woff2");
+  font-weight: 800;
+  font-display: swap;
+}
+
 body {
-  background-color: #f8fafc;
+  background-color: #ffffff;
   color: #0f172a;
+  font-family: "Freesentation", "Pretendard", system-ui, sans-serif;
 }
 
 .pixelated {

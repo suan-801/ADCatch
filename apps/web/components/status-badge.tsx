@@ -6,7 +6,7 @@ const LABEL: Record<AdStatus, string> = {
   INACTIVE: "Inactive",
 };
 
-// 색상은 PRD.MD 5.1 / .cursorrules 의 Status Badge 스펙 그대로.
+// 상태 색상(파랑/초록/회색)은 기능 의미 유지를 위해 기존 값을 그대로 보존.
 const STYLE: Record<AdStatus, string> = {
   NEW: "bg-blue-50 text-status-new border border-status-new/30",
   ACTIVE: "bg-green-50 text-status-active border border-status-active/30",
@@ -15,7 +15,7 @@ const STYLE: Record<AdStatus, string> = {
 
 export function StatusBadge({ status }: { status: AdStatus }) {
   return (
-    <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${STYLE[status]}`}>
+    <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${STYLE[status]}`}>
       {LABEL[status]}
     </span>
   );

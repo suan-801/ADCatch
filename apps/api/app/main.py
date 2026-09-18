@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.database import Base, engine
-from app.routers import ads, competitors, dashboard, projects
+from app.routers import ad_changes, ads, competitors, dashboard, projects
 
 app = FastAPI(title="AdCatch API", version="0.1.0")
 
@@ -28,6 +28,7 @@ app.include_router(projects.router)
 app.include_router(competitors.router)
 app.include_router(ads.router)
 app.include_router(dashboard.router)
+app.include_router(ad_changes.router)
 
 
 @app.on_event("startup")

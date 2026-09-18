@@ -9,6 +9,7 @@ from app.database import get_db
 from app.deps import get_current_user
 from app.models import Ad, Competitor, User
 from app.schemas import AdOut, SyncResult
+from app.services import collection_history
 from app.services.ad_library_collector import ApifyRunError, fetch_live_ads
 from app.services.ad_sync import synchronize_ad_status
 
@@ -44,19 +45,26 @@ def collect_now(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """해당 경쟁사에 대해 즉시 1회 수집 + 상태 동기화를 실행한다 (스케줄러 없이 수동 트리거용)."""
+    """해당 경쟁사에 대해 즉시 1회 수집 + 상태 동기화를 실행한다 (스케줄러 없이 수동 트리거용).
+
+    Daily Ad Change History: collection_run을 fetch 전에 미리 생성해두고, 실패 시에는
+    FAILED로 기록만 남긴 뒤 기존과 동일하게 502를 반환한다 (응답 계약 변경 없음) —
+    "수집 실패"가 "광고가 전부 꺼짐"으로 오판되지 않게 하는 핵심 장치."""
     competitor = _get_owned_competitor(db, competitor_id, user)
+    run = collection_history.start_collection_run(db, competitor_id)
     try:
         fetched = fetch_live_ads(
             competitor.ad_library_url,
             page_id=competitor.page_id or "",
         )
     except httpx.HTTPStatusError as e:
+        collection_history.fail_collection_run(db, run, str(e))
         raise HTTPException(
             status_code=502,
             detail=f"Apify 요청 실패 ({e.response.status_code}): APIFY_TOKEN이 올바른지 확인하세요. {e.response.text[:200]}",
         ) from e
     except (ApifyRunError, httpx.HTTPError) as e:
+        collection_history.fail_collection_run(db, run, str(e))
         raise HTTPException(status_code=502, detail=f"수집 실패: {e}") from e
 
-    return synchronize_ad_status(db, competitor_id, fetched)
+    return synchronize_ad_status(db, competitor_id, fetched, run)

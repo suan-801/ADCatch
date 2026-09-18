@@ -50,3 +50,31 @@ export function survivalDays(ad: Ad): number {
   const last = new Date(ad.last_seen_at).getTime();
   return Math.max(Math.round((last - first) / (1000 * 60 * 60 * 24)), 0);
 }
+
+// ── Daily Ad Change History (additive) ──────────────────────────────────
+export type AdChangeEventType = "STARTED" | "STOPPED" | "REACTIVATED";
+export type CollectionStatus = "SUCCESS" | "FAILED" | "NO_RECORD";
+
+export interface ChangedAd extends Ad {
+  event_type: AdChangeEventType;
+  competitor_name: string;
+}
+
+export interface AdChangeSummary {
+  started: number;
+  reactivated: number;
+  stopped: number;
+}
+
+export interface AdChangesResponse {
+  project_id: string;
+  date: string;
+  competitor_id: string | null;
+  collection_status: CollectionStatus;
+  history_available_from: string | null;
+  summary: AdChangeSummary;
+  started_ads: ChangedAd[];
+  reactivated_ads: ChangedAd[];
+  stopped_ads: ChangedAd[];
+  visual_pattern: Partial<Record<VisualType, number>>;
+}

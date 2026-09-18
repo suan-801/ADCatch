@@ -1,4 +1,4 @@
-import type { Ad, Competitor, DashboardMetrics, Project } from "./types";
+import type { Ad, AdChangesResponse, Competitor, DashboardMetrics, Project } from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -32,4 +32,10 @@ export const api = {
   listAds: (competitorId: string) => request<Ad[]>(`/competitors/${competitorId}/ads`),
   collectNow: (competitorId: string) =>
     request(`/competitors/${competitorId}/ads/collect`, { method: "POST" }),
+
+  getAdChanges: (projectId: string, params: { date: string; competitorId?: string }) => {
+    const qs = new URLSearchParams({ date: params.date });
+    if (params.competitorId) qs.set("competitor_id", params.competitorId);
+    return request<AdChangesResponse>(`/projects/${projectId}/ad-changes?${qs.toString()}`);
+  },
 };

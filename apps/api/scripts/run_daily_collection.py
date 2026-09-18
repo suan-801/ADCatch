@@ -22,7 +22,7 @@ from sqlalchemy import select
 
 from app.database import SessionLocal
 from app.models import Competitor, Project
-from app.services import teams_alert
+from app.services import collection_history, teams_alert
 from app.services.ad_library_collector import ApifyRunError, fetch_live_ads
 from app.services.ad_sync import synchronize_ad_status
 from app.services.autopause import apply_auto_pause
@@ -43,14 +43,16 @@ def run() -> None:
                 select(Competitor).where(Competitor.project_id == project.id)
             ).all()
             for competitor in competitors:
+                run = collection_history.start_collection_run(db, competitor.id)
                 try:
                     fetched = fetch_live_ads(competitor.ad_library_url, page_id=competitor.page_id or "")
-                    result = synchronize_ad_status(db, competitor.id, fetched)
+                    result = synchronize_ad_status(db, competitor.id, fetched, run)
                     results.append(result)
                     print(f"[{project.name}/{competitor.name}] "
                           f"신규={result.new_ads} 유지={result.reactivated_or_kept_active} "
                           f"종료={result.newly_inactive} 아카이빙={result.newly_archived}")
                 except ApifyRunError as e:
+                    collection_history.fail_collection_run(db, run, str(e))
                     print(f"[{project.name}/{competitor.name}] 수집 실패: {e}")
 
             if results:

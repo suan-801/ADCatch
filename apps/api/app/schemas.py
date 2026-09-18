@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 from pydantic import BaseModel, ConfigDict
@@ -112,3 +112,59 @@ class SyncResult(BaseModel):
     reactivated_or_kept_active: int
     newly_inactive: int
     newly_archived: int
+
+
+# ── Daily Ad Change History (additive) ─────────────────────────────────────
+
+class AdChangeEventType(str, Enum):
+    STARTED = "STARTED"
+    STOPPED = "STOPPED"
+    REACTIVATED = "REACTIVATED"
+
+
+class CollectionStatus(str, Enum):
+    SUCCESS = "SUCCESS"
+    FAILED = "FAILED"
+    NO_RECORD = "NO_RECORD"
+
+
+class ChangedAdOut(BaseModel):
+    """AdOut + 이 날짜에 발생한 이벤트 배지. 기존 AdOut 필드를 그대로 포함해
+    프론트가 기존 Ad Card 컴포넌트를 그대로 재사용할 수 있게 한다."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    competitor_id: uuid.UUID
+    ad_archive_id: str
+    status: AdStatus
+    visual_type: VisualType | None
+    format: AdFormat | None
+    image_url: str | None
+    copy_text: str | None
+    cta_text: str | None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    consecutive_inactive_days: int
+    is_archived: bool
+    event_type: AdChangeEventType
+    competitor_name: str
+
+
+class AdChangeSummary(BaseModel):
+    started: int
+    reactivated: int
+    stopped: int
+
+
+class AdChangesResponse(BaseModel):
+    project_id: uuid.UUID
+    date: date
+    competitor_id: uuid.UUID | None
+    collection_status: CollectionStatus
+    history_available_from: date | None
+    summary: AdChangeSummary
+    started_ads: list[ChangedAdOut]
+    reactivated_ads: list[ChangedAdOut]
+    stopped_ads: list[ChangedAdOut]
+    visual_pattern: dict[str, int]
