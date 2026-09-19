@@ -46,9 +46,15 @@ class Competitor(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     ad_library_url: Mapped[str] = mapped_column(Text, nullable=False)
     page_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    # PRD 3.1: 프로젝트(워크스페이스) = 자사 1 + 경쟁사 N. 자사도 동일 테이블의 한 row로 등록하되
-    # 대시보드 신규/종료 카운트·갤러리 집계에서는 제외한다.
+    # DEPRECATED (2026-09, Brand Model Simplification / P0-18~22): Project 안의 모든 등록 대상은
+    # 동일한 "추적 브랜드"로 취급한다 — 자사/경쟁사 구분은 더 이상 business logic에서 사용하지 않는다.
+    # 기존 데이터 보존을 위해 column만 남겨둔다(신규 조회/집계 로직은 이 필드를 참조하지 않음).
+    # 향후 실제 role 구분이 필요해지면 boolean이 아닌 generic한 brand_role/tags 필드를 검토한다.
     is_own_brand: Mapped[bool] = mapped_column(Boolean, default=False)
+    # P0-08: "첫 수집"이 아니라 "첫 COMPLETE SUCCESSFUL SNAPSHOT"이 Baseline이다. NULL이면 아직
+    # baseline이 확정되지 않은 상태(PARTIAL만 있었거나 아예 수집 이력이 없음) — 이 경우 STARTED/STOPPED/
+    # REACTIVATED 이벤트를 생성하지 않는다 (app.services.ad_sync 참고).
+    baseline_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     project: Mapped["Project"] = relationship(back_populates="competitors")
@@ -126,6 +132,13 @@ class AdObservation(Base):
     observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # 운영 중 실측 버그: relationship()이 없으면 SQLAlchemy unit-of-work가 같은 flush 안에서
+    # ads INSERT를 ad_observations INSERT보다 먼저 실행해야 한다는 걸 감지하지 못해 신규 Ad를
+    # 참조하는 ad_observations insert가 ForeignKeyViolation으로 실패했다(순수 Column(ForeignKey)만으로는
+    # unit-of-work의 flush 순서 계산에 반영되지 않는다 — Table 메타데이터의 FK와는 별개). 이 관계를
+    # 명시해 Ad가 항상 먼저 flush되도록 보장한다.
+    ad: Mapped["Ad"] = relationship()
+
 
 class AdStatusEvent(Base):
     """상태 "전환이 발생한 순간"에만 1건 생성된다 (같은 상태가 계속되는 동안 반복 생성되지 않음).
@@ -138,8 +151,16 @@ class AdStatusEvent(Base):
     ad_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("ads.id", ondelete="CASCADE"))
     competitor_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("competitors.id", ondelete="CASCADE"))
     collection_run_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("collection_runs.id", ondelete="CASCADE"))
-    event_type: Mapped[str] = mapped_column(String(20), nullable=False)  # STARTED | STOPPED | REACTIVATED
+    event_type: Mapped[str] = mapped_column(String(20), nullable=False)  # STARTED | STOPPED | REACTIVATED | BASELINE_DISCOVERED
     event_date: Mapped[date] = mapped_column(Date, nullable=False)
     previous_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     new_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    # P1-01: 이 이벤트가 발생한 "그 순간"의 집행/추적 일수를 고정 저장한다. Ad row는 이후에도 계속
+    # 갱신되므로(예: 이후 REACTIVATED로 last_seen_at이 앞으로 밀림), 과거 이벤트를 나중에 다시 조회할 때
+    # ad의 현재 값으로 재계산하면 숫자가 바뀌어버린다 — 이를 막기 위한 snapshot. 과거(이 필드 도입 이전)
+    # 이벤트는 NULL이며, 이 경우 fake backfill을 하지 않고 프론트가 라이브 계산으로 폴백한다.
+    survival_days_at_event: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # AdObservation과 동일한 이유로 필요 — 위 주석 참고.
+    ad: Mapped["Ad"] = relationship()

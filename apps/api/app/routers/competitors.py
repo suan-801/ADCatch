@@ -27,6 +27,8 @@ def create_competitor(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    """P0-18~22: Project 안의 모든 등록 대상은 동일한 '추적 브랜드'다. is_own_brand는 하위호환을
+    위해 계속 받아들이지만(기본값 False) 이후 어떤 business logic에서도 사용하지 않는다."""
     _get_owned_project(db, project_id, user)
     competitor = Competitor(
         project_id=project_id,

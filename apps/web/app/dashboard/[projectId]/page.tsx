@@ -84,7 +84,7 @@ export default function CurrentDashboardPage() {
       .catch((e) => setError(String(e)));
   }, [competitors, galleryCompetitorId]);
 
-  const handleCreateCompetitor = async (payload: { name: string; ad_library_url: string; is_own_brand: boolean }) => {
+  const handleCreateCompetitor = async (payload: { name: string; ad_library_url: string }) => {
     const competitor = await api.createCompetitor(projectId, payload);
     setCompetitors((prev) => [...prev, competitor]);
   };
@@ -106,7 +106,7 @@ export default function CurrentDashboardPage() {
 
       // §25: 실패/부분 수집은 절대 baseline 기준점으로 삼지 않는다 — SUCCESS(snapshot 완전)일 때만.
       if (result.is_baseline && result.snapshot_complete) {
-        const name = competitors.find((c) => c.id === competitorId)?.name ?? "경쟁사";
+        const name = competitors.find((c) => c.id === competitorId)?.name ?? "브랜드";
         setBaselineCta({
           competitorName: name,
           adCount: result.new_ads,
@@ -126,11 +126,19 @@ export default function CurrentDashboardPage() {
 
   const mascotMessage = collecting
     ? "지금 소재를 수집하고 있어요..."
-    : todayStartedCount > 0
-      ? `새로운 광고 ${todayStartedCount}개를 잡았어요!`
-      : competitors.length === 0
-        ? "아직 경쟁사가 없어요. 등록해볼까요?"
-        : "아직 새로운 광고가 없어요.";
+    : error
+      ? "앗, 수집 중 문제가 생겼어요."
+      : todayStartedCount > 0
+        ? `새로운 광고 ${todayStartedCount}개를 잡았어요!`
+        : competitors.length === 0
+          ? "아직 브랜드가 없어요. 등록해볼까요?"
+          : "아직 새로운 광고가 없어요.";
+
+  // P1-03: 챗봇처럼 매번 자동으로 열지 않는다 — 의미 있는 순간(온보딩/수집 중/수집 완료·실패/
+  // baseline 완료/신규 변화 감지)에만 이 key가 바뀌어 말풍선이 자동으로 열린다.
+  const mascotOpenSignal = `${collecting ? "collecting" : "idle"}|${error ?? ""}|${
+    baselineCta ? `${baselineCta.competitorName}-${baselineCta.adCount}` : ""
+  }|${todayStartedCount}|${competitors.length === 0 ? "onboarding" : ""}`;
 
   return (
     <div className="space-y-8">
@@ -184,7 +192,11 @@ export default function CurrentDashboardPage() {
         collecting={collecting}
       />
 
-      <MascotWidget message={mascotMessage} happy={todayStartedCount > 0 && !collecting} />
+      <MascotWidget
+        message={mascotMessage}
+        happy={todayStartedCount > 0 && !collecting}
+        openSignal={mascotOpenSignal}
+      />
     </div>
   );
 }

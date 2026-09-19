@@ -45,22 +45,5 @@ def test_archiving_after_consecutive_inactive_days(db, competitor):
     assert ad.consecutive_inactive_days == settings.archive_after_inactive_days
 
 
-def test_own_brand_excluded_from_project_wide_ad_changes(db, competitor):
-    from app.models import Competitor
-
-    own_brand = Competitor(
-        project_id=competitor.project_id,
-        name="자사",
-        ad_library_url="https://www.facebook.com/ads/library/?view_all_page_id=9",
-        page_id="9",
-        is_own_brand=True,
-    )
-    db.add(own_brand)
-    db.commit()
-    db.refresh(own_brand)
-
-    run = collection_history.start_collection_run(db, own_brand.id)
-    synchronize_ad_status(db, own_brand.id, [_raw("OWN-1")], run, tag_visual=False)
-
-    result = collection_history.get_ad_changes(db, competitor.project_id, run.run_date, None)
-    assert result.summary.started == 0  # 자사 소재는 프로젝트 전체 집계에서 제외
+# Brand Model Simplification (P0-18/P0-19): is_own_brand=True로 등록된 브랜드도 더 이상
+# 제외하지 않는다 — apps/api/tests/test_brand_simplification.py 에서 포함 여부를 직접 검증한다.

@@ -19,6 +19,9 @@ class Settings(BaseSettings):
 
     gemini_api_key: str = ""
     gemini_model: str = "gemini-3.6-flash"
+    # 신규 소재 enrichment(이미지 다운로드+Storage 캐싱+Gemini 태깅)를 동시에 몇 개까지 처리할지.
+    # 순차 처리 시 광고 수가 많은 브랜드는 수집 1회에 수 분~수십 분이 걸릴 수 있어 병렬화했다.
+    media_enrichment_concurrency: int = 8
 
     teams_webhook_url: str = ""
 

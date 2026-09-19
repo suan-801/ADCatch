@@ -68,6 +68,8 @@ class ProjectOut(BaseModel):
 class CompetitorCreate(BaseModel):
     name: str
     ad_library_url: str
+    # DEPRECATED (P0-21/P0-18~22): Brand Model Simplification 이후 새 클라이언트는 이 필드를
+    # 보낼 필요가 없다. 하위호환을 위해 optional로 남겨두되 business logic에서는 무시된다.
     is_own_brand: bool = False
 
 
@@ -79,6 +81,7 @@ class CompetitorOut(BaseModel):
     name: str
     ad_library_url: str
     page_id: str | None
+    # DEPRECATED — 더 이상 UI/집계 로직에서 사용하지 않는다. 하위호환을 위해 응답에는 남겨둔다.
     is_own_brand: bool
     created_at: datetime
 
@@ -168,6 +171,9 @@ class ChangedAdOut(BaseModel):
     is_archived: bool
     event_type: AdChangeEventType
     competitor_name: str
+    # P1-01: 이 이벤트가 발생한 순간에 고정된 집행/추적 일수. None이면(이 필드 도입 이전 이벤트)
+    # 프론트가 현재 ad 값 기준으로 라이브 계산한다(fake backfill 금지).
+    survival_days_at_event: int | None = None
 
 
 class AdChangeSummary(BaseModel):
@@ -176,13 +182,24 @@ class AdChangeSummary(BaseModel):
     stopped: int
 
 
+class CollectionStatusSummary(BaseModel):
+    """P0-15: 프로젝트 단위 수집 상태를 단일 값으로 뭉개지 않고, 브랜드별 상태 분포를 함께 제공한다."""
+
+    success: int
+    partial: int
+    failed: int
+    no_record: int
+
+
 class AdChangesResponse(BaseModel):
     project_id: uuid.UUID
     date: date
     competitor_id: uuid.UUID | None
     collection_status: CollectionStatus
+    # P0-15: 하나의 값(collection_status)만으로는 "일부만 실패"가 감춰지므로, 브랜드별 상태 분포도 함께 제공한다.
+    collection_summary: CollectionStatusSummary
     history_available_from: date | None
-    # 이 날짜가 경쟁사 등록 직후의 baseline 수집일이면 > 0 (P0-03). summary의 started/reactivated와는
+    # 이 날짜가 브랜드 등록 직후의 baseline 수집일이면 > 0 (P0-03). summary의 started/reactivated와는
     # 별개로 집계되며, 프론트는 이 값이 있을 때 "오늘 N개를 켰어요"가 아니라 "N개를 처음 확인했어요"로 표기한다.
     baseline_discovered_count: int
     summary: AdChangeSummary
@@ -193,10 +210,15 @@ class AdChangesResponse(BaseModel):
 
 
 class CollectionFreshness(BaseModel):
-    """프로젝트 헤더 근처에 표시할 '이 데이터를 믿어도 되는가' 요약 (P0-09)."""
+    """프로젝트 헤더 근처에 표시할 '이 데이터를 믿어도 되는가' 요약 (P0-09/P0-16)."""
 
     project_id: uuid.UUID
     latest_run_at: datetime | None
     total_competitors: int
+    # 하위호환: SUCCESS + PARTIAL 합계(기존 의미 그대로 유지).
     healthy_competitors: int
+    # P0-16: PARTIAL을 SUCCESS와 동일하게 "정상"으로 뭉개지 않기 위한 세부 분해.
+    success_competitors: int
+    partial_competitors: int
+    partial_competitor_names: list[str]
     failed_competitor_names: list[str]

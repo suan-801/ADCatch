@@ -20,34 +20,85 @@ STARTED/STOPPED/REACTIVATED 이벤트를 1건씩 기록한다 (collection_run은
   - P0-02 snapshot_complete=False(=max_ads 상한 도달로 스냅샷이 잘렸을 가능성) 인 경우,
     "미발견 → STOPPED" 추론 자체를 건너뛴다. 발견된 소재의 STARTED/ACTIVE/REACTIVATED 갱신은
     그대로 유효하므로 정상 수행한다.
-  - P0-03 이 경쟁사의 첫 성공/부분성공 수집(baseline)에서는 STARTED 대신 BASELINE_DISCOVERED를
-    기록한다 — "오늘 갑자기 N개를 켰다"는 거짓 신호를 만들지 않기 위함.
+  - P0-07/P0-08 Baseline은 "첫 수집"이 아니라 "첫 COMPLETE SUCCESSFUL SNAPSHOT"이다.
+    competitor.baseline_completed_at이 NULL인 동안은(=baseline pending) 어떤 이벤트도
+    생성하지 않는다 — 발견된 소재는 저장하되(status=ACTIVE), STARTED/STOPPED/REACTIVATED는 물론
+    BASELINE_DISCOVERED조차 "이 수집이 완전한 성공(snapshot_complete=True)"일 때만 기록한다.
+    그 완전한 성공 run이 곧 baseline이 되며, 그 순간 baseline_completed_at을 확정 저장한다.
+    그 다음 successful complete collection부터 정상적으로 STARTED/STOPPED/REACTIVATED를 생성한다.
+  - P0-09 Baseline에서 발견된 소재는 "오늘 새로 시작한 광고(NEW)"가 아니라 "ADCatcher가 처음
+    확인한 현재 집행 소재"이므로 status=ACTIVE로 생성한다(NEW 배지가 붙지 않도록).
   - P0-07 Gemini/썸네일 캐싱(enrichment) 실패가 수집(core data) 자체를 무효화해서는 안 된다.
+
+성능(운영 중 실측 — 대량 소재 브랜드 첫 수집이 "무한 수집중"처럼 보이던 문제):
+  - 신규 소재의 enrichment(이미지 다운로드 + Storage 캐싱 + Gemini 태깅)는 소재마다 네트워크 I/O가
+    여러 번 발생한다. 이걸 소재 개수만큼 순차로 돌리면 소재가 많은 브랜드(예: 첫 baseline 수집)는
+    한 번의 /collect 요청이 수 분~수십 분씩 걸려 사실상 멈춘 것처럼 보인다. 그래서 이 함수는
+    DB에 쓰기 전에 신규 소재들의 enrichment를 ThreadPoolExecutor로 먼저 동시에 실행해둔다
+    (SQLAlchemy Session 자체는 스레드 세이프하지 않으므로 DB 쓰기는 항상 메인 스레드에서 순차로 한다).
 """
 
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Ad, CollectionRun
-from app.schemas import AdChangeEventType, AdStatus, RawAdItem, SyncResult
+from app.models import Ad, Competitor, CollectionRun
+from app.schemas import AdChangeEventType, AdStatus, RawAdItem, SyncResult, VisualType
 from app.services import collection_history, media
 
 
-def _is_baseline_collection(db: Session, competitor_id: uuid.UUID, current_run_id: uuid.UUID) -> bool:
-    prior_success = db.scalar(
-        select(CollectionRun.id)
-        .where(
-            CollectionRun.competitor_id == competitor_id,
-            CollectionRun.status.in_(["SUCCESS", "PARTIAL"]),
-            CollectionRun.id != current_run_id,
-        )
-        .limit(1)
-    )
-    return prior_success is None
+def _survival_days_at(source_started_at: datetime | None, first_seen_at: datetime, at: datetime) -> int:
+    # SQLite(테스트 환경)는 DateTime(timezone=True) 컬럼도 naive datetime으로 되돌려주므로,
+    # Postgres(운영)에서는 항상 aware인 값과 섞여도 안전하게 빼기 위해 naive로 정규화한다.
+    def _naive(dt: datetime) -> datetime:
+        return dt.replace(tzinfo=None) if dt.tzinfo is not None else dt
+
+    start = source_started_at or first_seen_at
+    return max((_naive(at) - _naive(start)).days, 0)
+
+
+class _Enrichment:
+    __slots__ = ("image_url", "visual_type", "analysis_status", "analysis_error")
+
+    def __init__(self, image_url: str | None, visual_type: VisualType | None, analysis_status: str, analysis_error: str | None):
+        self.image_url = image_url
+        self.visual_type = visual_type
+        self.analysis_status = analysis_status
+        self.analysis_error = analysis_error
+
+
+def _enrich_one(competitor_id: uuid.UUID, ad_archive_id: str, image_url: str) -> _Enrichment:
+    # P0-07: enrichment(캐싱+Gemini)는 core data(수집)와 완전히 분리한다 — 어떤 예외가 나든
+    # 이 함수는 예외를 밖으로 던지지 않고 FAILED로 기록만 남긴다(광고 row 생성은 항상 계속돼야 함).
+    try:
+        cached_url, visual_type = media.process_ad_image(competitor_id, ad_archive_id, image_url)
+        return _Enrichment(cached_url, visual_type, "SUCCESS" if visual_type else "PENDING", None)
+    except Exception as e:  # noqa: BLE001 - 의도적으로 광범위하게 격리
+        return _Enrichment(image_url, None, "FAILED", str(e)[:500])
+
+
+def _enrich_new_ads_concurrently(
+    competitor_id: uuid.UUID, new_items: list[RawAdItem]
+) -> dict[str, _Enrichment]:
+    """신규 소재 중 image_url이 있는 것들의 enrichment를 동시에 실행해 결과를 모아 돌려준다.
+    네트워크 I/O 대기 중 GIL이 풀리는 순수 blocking I/O(httpx)이므로 스레드풀로 충분하다."""
+    targets = [item for item in new_items if item.image_url]
+    if not targets:
+        return {}
+    results: dict[str, _Enrichment] = {}
+    max_workers = min(settings.media_enrichment_concurrency, len(targets))
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_enrich_one, competitor_id, item.ad_archive_id, item.image_url): item.ad_archive_id
+            for item in targets
+        }
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+    return results
 
 
 def synchronize_ad_status(
@@ -60,13 +111,29 @@ def synchronize_ad_status(
 ) -> SyncResult:
     now = datetime.now(timezone.utc)
     event_date = collection_run.run_date
-    is_baseline = _is_baseline_collection(db, competitor_id, collection_run.id)
+    competitor = db.get(Competitor, competitor_id)
+    # P0-07/P0-08: baseline_completed_at이 NULL이면 아직 "확정된 첫 완전 스냅샷"이 없는 상태.
+    is_baseline_pending = competitor is not None and competitor.baseline_completed_at is None
+    # SyncResult.is_baseline: 이번 run이 baseline 확립에 관여했는지(pending 중이었는지) 여부.
+    # 프론트는 is_baseline && snapshot_complete 조합으로만 Baseline CTA를 노출하므로,
+    # PARTIAL pending run(snapshot_complete=False)에 대해 True를 반환해도 CTA는 뜨지 않는다.
+    is_baseline = is_baseline_pending
+    # 이번 run이 실제로 baseline을 "확정"하는 run인가 — pending 상태에서 완전한 성공일 때만.
+    establishes_baseline = is_baseline_pending and snapshot_complete
 
     # P0-04: 아카이빙된 광고도 ad_archive_id가 재등장할 수 있으므로, is_archived 필터 없이
     # 전부 불러와 "완전히 새로운 광고"와 "재등장한 기존 row"를 정확히 구분한다.
     existing_ads = db.scalars(select(Ad).where(Ad.competitor_id == competitor_id)).all()
     existing_by_archive_id = {ad.ad_archive_id: ad for ad in existing_ads}
     fetched_by_archive_id = {item.ad_archive_id: item for item in fetched_ads}
+
+    # DB 쓰기 루프를 시작하기 전에, 신규 소재의 enrichment(이미지 다운로드+캐싱+Gemini 태깅)를
+    # 먼저 동시에 실행해둔다 — 소재 개수만큼 순차로 돌리면 대량 소재 브랜드의 수집이 체감상
+    # "무한 수집중"처럼 보일 만큼 느려진다.
+    enrichment_results: dict[str, _Enrichment] = {}
+    if tag_visual:
+        new_items = [item for aid, item in fetched_by_archive_id.items() if aid not in existing_by_archive_id]
+        enrichment_results = _enrich_new_ads_concurrently(competitor_id, new_items)
 
     new_count = 0
     kept_active_count = 0
@@ -77,32 +144,31 @@ def synchronize_ad_status(
     for ad_archive_id, item in fetched_by_archive_id.items():
         existing = existing_by_archive_id.get(ad_archive_id)
         if existing is None:
-            image_url = item.image_url
-            visual_type = None
-            analysis_status = "PENDING"
-            analysis_error = None
-            analyzed_at = None
-            if tag_visual and item.image_url:
-                # P0-07: enrichment(캐싱+Gemini)는 core data(수집)와 완전히 분리한다.
-                # 여기서 어떤 예외가 나든 이 광고 row 생성과 나머지 처리는 계속돼야 한다.
-                try:
-                    image_url, visual_type = media.process_ad_image(competitor_id, ad_archive_id, item.image_url)
-                    analysis_status = "SUCCESS" if visual_type else "PENDING"
-                    analyzed_at = now
-                except Exception as e:  # noqa: BLE001 - 의도적으로 광범위하게 격리
-                    image_url = item.image_url
-                    visual_type = None
-                    analysis_status = "FAILED"
-                    analysis_error = str(e)[:500]
-                    analyzed_at = now
+            enrichment = enrichment_results.get(ad_archive_id)
+            if enrichment is not None:
+                image_url = enrichment.image_url
+                visual_type = enrichment.visual_type
+                analysis_status = enrichment.analysis_status
+                analysis_error = enrichment.analysis_error
+                analyzed_at = now
+            else:
+                # tag_visual=False였거나 image_url이 애초에 없던 경우 — enrichment 자체를 하지 않는다.
+                image_url = item.image_url
+                visual_type = None
+                analysis_status = "PENDING"
+                analysis_error = None
+                analyzed_at = None
 
             new_ad_id = uuid.uuid4()
+            # P0-09: baseline(pending) 중에 발견된 소재는 "오늘 켠 광고"가 아니라 "처음 확인한
+            # 현재 집행 소재"이므로 NEW가 아니라 ACTIVE로 생성한다(Gallery NEW 배지 방지).
+            initial_status = AdStatus.ACTIVE.value if is_baseline_pending else AdStatus.NEW.value
             db.add(
                 Ad(
                     id=new_ad_id,
                     competitor_id=competitor_id,
                     ad_archive_id=ad_archive_id,
-                    status=AdStatus.NEW.value,
+                    status=initial_status,
                     visual_type=visual_type.value if visual_type else None,
                     format=item.format.value,
                     image_url=image_url,
@@ -118,18 +184,24 @@ def synchronize_ad_status(
                 )
             )
             new_count += 1
-            collection_history.record_event(
-                db,
-                ad_id=new_ad_id,
-                competitor_id=competitor_id,
-                collection_run_id=collection_run.id,
-                event_type=(
-                    AdChangeEventType.BASELINE_DISCOVERED.value if is_baseline else AdChangeEventType.STARTED.value
-                ),
-                event_date=event_date,
-                previous_status=None,
-                new_status=AdStatus.NEW.value,
-            )
+            # P0-07/P0-08: baseline이 아직 pending인데 이번 run이 완전한 성공이 아니면(=PARTIAL),
+            # 어떤 이벤트도 남기지 않는다 — "확정된 baseline"이 아닌 중간 관측치이기 때문이다.
+            if not is_baseline_pending or establishes_baseline:
+                collection_history.record_event(
+                    db,
+                    ad_id=new_ad_id,
+                    competitor_id=competitor_id,
+                    collection_run_id=collection_run.id,
+                    event_type=(
+                        AdChangeEventType.BASELINE_DISCOVERED.value
+                        if is_baseline_pending
+                        else AdChangeEventType.STARTED.value
+                    ),
+                    event_date=event_date,
+                    previous_status=None,
+                    new_status=initial_status,
+                    survival_days_at_event=_survival_days_at(item.start_date, now, now),
+                )
             collection_history.record_observation(
                 db, collection_run_id=collection_run.id, competitor_id=competitor_id, ad_id=new_ad_id
             )
@@ -142,7 +214,8 @@ def synchronize_ad_status(
             kept_active_count += 1
             # INACTIVE(아카이빙된 광고 포함, is_archived=True는 항상 status=INACTIVE를 동반함)였던
             # 광고가 다시 발견된 경우에만 REACTIVATED. 계속 노출 중이던 광고는 새 이벤트 없음.
-            if previous_status == AdStatus.INACTIVE.value:
+            # P0-07/P0-08: baseline이 아직 pending인 동안은 이벤트를 만들지 않는다(위 새 소재 분기와 동일 원칙).
+            if previous_status == AdStatus.INACTIVE.value and not is_baseline_pending:
                 collection_history.record_event(
                     db,
                     ad_id=existing.id,
@@ -152,6 +225,7 @@ def synchronize_ad_status(
                     event_date=event_date,
                     previous_status=previous_status,
                     new_status=AdStatus.ACTIVE.value,
+                    survival_days_at_event=_survival_days_at(existing.source_started_at, existing.first_seen_at, now),
                 )
             collection_history.record_observation(
                 db, collection_run_id=collection_run.id, competitor_id=competitor_id, ad_id=existing.id
@@ -160,11 +234,17 @@ def synchronize_ad_status(
     # 2) 기존에 추적 중이었으나 이번엔 미발견 → INACTIVE, 14일 연속 미노출 시 아카이빙.
     # P0-02: snapshot이 잘렸을 수 있는 경우(snapshot_complete=False)에는 이 추론 자체를 하지 않는다 —
     # "못 받아온 것"과 "광고주가 껐다"를 혼동하면 안 된다.
-    if snapshot_complete:
+    # P0-07/P0-08: baseline이 이번 run에서 막 확정되는 순간(establishes_baseline)에도 비교 기준이 될
+    # "직전의 확정된 상태"가 아직 없으므로 STOPPED 추론을 하지 않는다 — STOPPED는 baseline이 이미
+    # 확정된 이후의 수집부터 시작된다.
+    if snapshot_complete and not is_baseline_pending:
         for ad_archive_id, existing in existing_by_archive_id.items():
             if existing.is_archived or ad_archive_id in fetched_by_archive_id:
                 continue
             previous_status = existing.status
+            # STOPPED 시점에 고정할 생존일수 — 이후 existing.last_seen_at이 REACTIVATED 등으로
+            # 앞으로 밀려도 이 이벤트의 값은 바뀌지 않는다(P1-01). status 전환 전에 계산한다.
+            survival_snapshot = _survival_days_at(existing.source_started_at, existing.first_seen_at, existing.last_seen_at)
             existing.status = AdStatus.INACTIVE.value
             existing.consecutive_inactive_days += 1
             # P0-05: newly_inactive/STOPPED는 상태가 "이번에" 전환된 경우에만 센다.
@@ -180,10 +260,14 @@ def synchronize_ad_status(
                     event_date=event_date,
                     previous_status=previous_status,
                     new_status=AdStatus.INACTIVE.value,
+                    survival_days_at_event=survival_snapshot,
                 )
             if existing.consecutive_inactive_days >= settings.archive_after_inactive_days:
                 existing.is_archived = True
                 newly_archived_count += 1
+
+    if establishes_baseline:
+        competitor.baseline_completed_at = now
 
     if snapshot_complete:
         collection_history.complete_collection_run_success(db, collection_run, fetched_ads_count=len(fetched_ads))

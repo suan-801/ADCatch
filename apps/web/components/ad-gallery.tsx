@@ -10,7 +10,7 @@ export function AdGallery({ ads }: { ads: GalleryAd[] }) {
   if (sorted.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-border p-12 text-center text-sm text-muted">
-        아직 수집된 소재가 없습니다. 경쟁사를 등록하고 수집을 실행해보세요.
+        아직 수집된 소재가 없습니다. 브랜드를 등록하고 수집을 실행해보세요.
       </div>
     );
   }
@@ -30,7 +30,7 @@ export function AdGallery({ ads }: { ads: GalleryAd[] }) {
                 <img
                   src={ad.image_url}
                   alt={ad.copy_text ?? "ad creative"}
-                  className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+                  className="h-full w-full object-contain transition-transform group-hover:scale-[1.02]"
                 />
               ) : (
                 <span className="text-xs text-muted">{ad.format ?? "미디어 없음"}</span>

@@ -53,7 +53,7 @@ export default function DailyChangesPage() {
 
   const competitorLabel = competitorId
     ? (competitors.find((c) => c.id === competitorId)?.name ?? "전체")
-    : "전체 경쟁사";
+    : "전체 브랜드";
 
   const startedAndReactivated = result ? [...result.started_ads, ...result.reactivated_ads] : [];
   const message = emptyStateMessage(result ?? ({ summary: { started: 0, reactivated: 0, stopped: 0 } } as AdChangesResponse));
@@ -65,6 +65,10 @@ export default function DailyChangesPage() {
       : result.summary.stopped > 0
         ? `이날은 ${result.summary.stopped}개 광고가 종료됐어요.`
         : "이날은 큰 변화가 없었어요.";
+
+  // P1-03: "신규 변화 감지"일 때만 자동으로 말풍선을 연다 — 변화가 없는 날은 조용히 있는다.
+  const hasChanges = !!result && result.summary.started + result.summary.reactivated + result.summary.stopped > 0;
+  const mascotOpenSignal = hasChanges ? `${date}-${competitorId ?? "all"}` : undefined;
 
   return (
     <div className="space-y-8">
@@ -108,7 +112,11 @@ export default function DailyChangesPage() {
         </>
       )}
 
-      <MascotWidget message={mascotMessage} happy={(result?.summary.started ?? 0) > 0} />
+      <MascotWidget
+        message={mascotMessage}
+        happy={(result?.summary.started ?? 0) > 0}
+        openSignal={mascotOpenSignal}
+      />
     </div>
   );
 }

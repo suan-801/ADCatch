@@ -19,7 +19,13 @@ const EVENT_BADGE: Record<ChangedAd["event_type"], { label: string; className: s
 export function ChangedAdCard({ ad }: { ad: ChangedAd }) {
   const { projectId } = useParams<{ projectId: string }>();
   const badge = EVENT_BADGE[ad.event_type];
-  const running = runningDays(ad);
+  // P1-01: 이 이벤트 카드는 "그 날 그 순간"의 숫자를 보여줘야 한다 — ad의 현재 값으로 라이브
+  // 계산하면 이후 REACTIVATED 등으로 last_seen_at이 앞으로 밀릴 때 과거 카드의 숫자까지 바뀐다.
+  // survival_days_at_event가 있으면(신규 이벤트) 그 값을 그대로 쓰고, 없으면(구 이벤트) 폴백한다.
+  const running =
+    ad.survival_days_at_event != null
+      ? { days: ad.survival_days_at_event, label: ad.source_started_at ? ("집행" as const) : ("추적" as const) }
+      : runningDays(ad);
 
   return (
     <Link
@@ -32,7 +38,7 @@ export function ChangedAdCard({ ad }: { ad: ChangedAd }) {
           <img
             src={ad.image_url}
             alt={ad.copy_text ?? "ad creative"}
-            className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+            className="h-full w-full object-contain transition-transform group-hover:scale-[1.02]"
           />
         ) : (
           <span className="text-xs text-muted">{ad.format ?? "미디어 없음"}</span>

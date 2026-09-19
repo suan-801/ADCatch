@@ -61,10 +61,13 @@ def test_case3_stopped(db, competitor):
     assert stopped[0].previous_status == "ACTIVE"
 
 
-# CASE 3b — 등장한 첫날 바로 사라져도(=NEW 상태에서 STOPPED) 정확히 1건 기록되어야 한다
+# CASE 3b — baseline 이후에 등장한 광고가 등장한 첫날 바로 사라져도(=NEW 상태에서 STOPPED)
+# 정확히 1건 기록되어야 한다. (baseline 자체에서 발견된 광고는 NEW가 아니라 ACTIVE로 생성되므로
+# — P0-09 — "NEW에서 바로 STOPPED"를 재현하려면 baseline 이후에 새로 등장한 광고여야 한다.)
 def test_case3b_stopped_directly_from_new(db, competitor):
-    synchronize_ad_status(db, competitor.id, [_raw("A")], _run(db, competitor), tag_visual=False)  # NEW
-    synchronize_ad_status(db, competitor.id, [], _run(db, competitor), tag_visual=False)  # 사라짐
+    synchronize_ad_status(db, competitor.id, [_raw("Z")], _run(db, competitor), tag_visual=False)  # baseline
+    synchronize_ad_status(db, competitor.id, [_raw("Z"), _raw("A")], _run(db, competitor), tag_visual=False)  # A: NEW
+    synchronize_ad_status(db, competitor.id, [_raw("Z")], _run(db, competitor), tag_visual=False)  # A 사라짐
 
     stopped = [e for e in _events(db, competitor.id) if e.event_type == "STOPPED"]
     assert len(stopped) == 1

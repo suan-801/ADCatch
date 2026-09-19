@@ -21,7 +21,7 @@ def get_dashboard(
     user: User = Depends(get_current_user),
 ):
     """PRD 4장 'Fact Metrics' — 신규/종료/유지 카운트 + 비주얼 포맷 비율.
-    자사(is_own_brand=True) 소재는 경쟁사 집계에서 제외한다 (PRD 3.1)."""
+    P0-18/P0-19: Project 안의 모든 등록 브랜드를 동일하게 집계한다(자사/경쟁사 구분 없음)."""
     project = db.get(Project, project_id)
     if project is None or project.user_id != user.id:
         raise HTTPException(status_code=404, detail="Project not found")
@@ -31,7 +31,6 @@ def get_dashboard(
         .join(Competitor, Ad.competitor_id == Competitor.id)
         .where(
             Competitor.project_id == project_id,
-            Competitor.is_own_brand.is_(False),
             Ad.is_archived.is_(False),
         )
     ).all()

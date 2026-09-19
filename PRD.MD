@@ -1,8 +1,12 @@
-# PRD.md: 경쟁사 메타 소재 트래커 (ADCatcher)
+# PRD.md: 광고 소재 트래커 (ADCatcher)
+
+> 핵심 데이터 개념(Brand/Baseline/이벤트/수집 상태 등)의 상세 정의는
+> [`docs/DATA_SEMANTICS.md`](./docs/DATA_SEMANTICS.md)를 기준 문서로 삼는다. 이 PRD와 어긋나면
+> `docs/DATA_SEMANTICS.md` 쪽이 더 최신/정확하다.
 
 ## 1. 프로젝트 개요
 * **프로젝트명:** ADCatcher (애드캐처)
-* **한 줄 설명:** 경쟁사의 Meta Ad Library 라이브 소재를 매일 자동 수집하여 신규/종료 감지, 생존 기간, 비주얼 패턴 분석 등 **Fact 기반 데이터**를 제공하고 업무 프로세스를 안내하는 경쟁사 인텔리전스 웹 서비스
+* **한 줄 설명:** Project 안에 등록한 브랜드들의 Meta Ad Library 라이브 소재를 매일 자동 수집하여 신규/종료 감지, 생존 기간, 비주얼 패턴 분석 등 **Fact 기반 데이터**를 제공하고 업무 프로세스를 안내하는 광고 소재 인텔리전스 웹 서비스
 * **프로젝트 유형:** Web Application (MVP: 계정 인증 생략 사내 전용 툴 → 추후 B2B SaaS 확장)
 * **개발 난이도:** MVP 기준 ★★★☆☆
 
@@ -11,8 +15,8 @@
 ## 2. 사용자 시나리오 및 페르소나
 * **Target User:** 퍼포먼스 마케터, 대행사 AE, 마케팅 전략가
 * **주요 사용 시나리오:**
-  1. **데일리 모니터링:** 출근 직후 접속하여 프로젝트(브랜드)를 선택하고, 어제 대비 신규 투입(New) 및 집행 중단(Inactive)된 소재 수치와 주요 비주얼 변동을 확인.
-  2. **라이브 소재 갤러리 분석:** 현재 집행 중인 경쟁사 라이브 소재를 생존일수 순으로 모아보며, 장기간 유지되는 소재의 Hook 및 비주얼 포맷을 분석하여 신규 소재 기획 아이디어 발상.
+  1. **데일리 모니터링:** 출근 직후 접속하여 프로젝트를 선택하고, 어제 대비 신규 투입(New) 및 집행 중단(Inactive)된 소재 수치와 주요 비주얼 변동을 확인.
+  2. **라이브 소재 갤러리 분석:** 현재 집행 중인 브랜드의 라이브 소재를 생존일수 순으로 모아보며, 장기간 유지되는 소재의 Hook 및 비주얼 포맷을 분석하여 신규 소재 기획 아이디어 발상.
   3. **픽셀 비서 안내 활용:** 우측 하단에 상주하는 도트 비서 캐릭터("캐쳐")의 툴팁 안내를 받으며 초기 수집 등록, 필터링, 데이터 익스포트 기능을 손쉽게 활용.
 
 ---
@@ -20,7 +24,7 @@
 ## 3. 워크스페이스 및 데이터/운영 정책
 
 ### 3.1 프로젝트(워크스페이스) 단위 분리
-* **다중 브랜드 구조:** 자사 1곳 + 경쟁사 N곳을 하나의 **'프로젝트(Workspace)'**로 묶어 관리.
+* **Project = 브랜드 N개:** 관련 광고를 함께 추적하고 싶은 브랜드 N개를 하나의 **'프로젝트(Workspace)'**로 묶어 관리한다. Project 안에 등록되는 모든 대상은 동일한 **"브랜드"**다 — "자사"와 "경쟁사"를 구분하지 않으며, Dashboard/Gallery/Daily Changes/Freshness/자동 수집 모두 모든 브랜드를 동등하게 처리한다(상세: `docs/DATA_SEMANTICS.md` §1).
 * **프로젝트 스위처:** 사이드바 드롭다운을 통해 프로젝트를 전환하며, 선택된 프로젝트에 맞춰 대시보드 내 모든 metrics, 갤러리, 수집 스케줄이 동적으로 필터링됨.
 
 ### 3.2 MVP 계정 정책 및 14일 자동 수집 중단 (Auto-Pause)
@@ -44,21 +48,26 @@
 | :--- | :--- | :--- |
 | **수집 엔진** | **Daily Meta Ad Collector** | 매일 정해진 시각 프로젝트별 등록된 Meta Ad Library URL/페이지 ID 기반 광고 데이터 수집 |
 | **라이브 관리** | **Active/Inactive & 수명 계산** | 라이브러리 발견 시 `Active`(생존일수 +1), 미발견 시 `Inactive` 처리. 14일 연속 미노출 시 아카이빙 |
+| **온보딩** | **Initial Baseline + Daily Catch Opt-in** | 브랜드 등록 후 첫 완전한 성공 수집이 Baseline이 되며(`docs/DATA_SEMANTICS.md` §3), Baseline 완료 시에만 "매일 변화 CATCH하기" opt-in CTA를 노출 |
+| **변화 추적** | **Daily Ad Change History** | 날짜 × 브랜드 기준으로 그 날 켠(STARTED/REACTIVATED)/끈(STOPPED) 광고와 비주얼 패턴을 조회 |
+| **신뢰도 표시** | **Collection Freshness** | 프로젝트의 브랜드별 최신 수집 상태(정상/부분 수집/실패)를 헤더 근처에서 바로 보여줌 |
 | **비주얼 분석** | **Vision AI Tagging** | Gemini Vision API를 이용해 이미지 내 인물 포함 여부, 텍스트 중심 여부, 제품 중심 여부 자동 태깅 |
 | **대시보드** | **Fact Metrics & 갤러리** | 신규/종료/유지 개수 카드, 비주얼 포맷 비율 차트, 카드형 라이브 광고 갤러리(생존기간 순 정렬) 제공 |
-| **알림** | **Teams Webhook Alert** | 수집 완료 후 Microsoft Teams 채널로 당일 신규/종료 소재 수치 및 최고 장수 소재 요약 알림 전송 |
-| **온보딩/안내** | **Pixel Assistant Guide** | 우측 하단 상주 도트 비서 캐릭터("캐쳐")가 온보딩, 수집 상태, 주요 비주얼 변동 패치를 툴팁으로 안내 |
+| **알림** | **Teams Webhook Alert** | 수집 완료 후 Microsoft Teams 채널로 당일 신규(STARTED 기준)/종료 소재 수치 및 최고 장수 소재 요약 알림 전송 |
+| **온보딩/안내** | **Pixel Assistant Guide** | 우측 하단 상주 도트 비서 캐릭터("캐쳐")가 의미 있는 순간(온보딩/Baseline 완료/신규 변화/수집 완료·실패)에만 말풍선을 열어 안내 |
 
 ---
 
 ## 5. UI/UX 및 디자인 가이드
 
 ### 5.1 레이아웃 톤앤매너
-* **스타일:** Linear / Vercel 스타일의 극도로 깔끔하고 미니멀한 B2B SaaS 대시보드.
-* **컬러 시스템:** 
-  * Background: Slate White / Muted Gray (`#F8FAFC`, `#0F172A`)
+* **Landing Page**(별도 톤, 이 PRD 작업 범위에서 수정하지 않음): Orange 중심, 큰 3D 캐쳐, 큰 타이포그래피/그래픽, 짧은 브랜드 스토리텔링.
+* **Product 화면**(Dashboard/Daily Changes 등): 70% 전문 업무 툴 + 30% ADCatcher personality. White/warm-white 배경, Orange accent, Dark navy 타이포. 광고 소재 이미지를 최우선으로 보여주고 여백/위계를 우선한다. 제네릭 AI 그라데이션, 과도한 둥근 카드, 글래스모피즘은 지양한다.
+* **컬러 시스템:**
+  * Background: White / Warm White (`#F8FAFC`)
   * Border: Thin 1px Line (`#E2E8F0`)
   * Status Badges: Muted Blue (`New`), Muted Green (`Active`), Muted Gray (`Inactive`)
+* 상세 규칙은 `.cursorrules` 참고.
 
 ### 5.2 픽셀 도트 비서 캐릭터 (캐쳐)
 * **비주얼 컨셉:** 16x16 레트로 픽셀 아트 스타일의 캐릭터.
@@ -71,7 +80,7 @@
 
 ## 6. 기술 스택
 
-* **Frontend:** Streamlit (초기 초고속 구축) 또는 Next.js (`shadcn/ui` + Tailwind CSS)
+* **Frontend:** Next.js (App Router) + Tailwind CSS
 * **Backend:** Python (FastAPI)
 * **Database:** PostgreSQL / Supabase
 * **Object Storage:** AWS S3 or Local Cloud Storage

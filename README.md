@@ -1,7 +1,8 @@
 # ADCatcher (애드캐처)
 
-경쟁사의 Meta Ad Library 라이브 소재를 매일 자동 수집해 신규/종료 감지, 생존 기간, 비주얼 패턴 분석 등
-**Fact 기반 데이터**를 제공하는 경쟁사 인텔리전스 웹 서비스. 자세한 제품 요구사항은 [`PRD.MD`](./PRD.MD) 참고.
+Project 안에 등록한 브랜드들의 Meta Ad Library 라이브 소재를 매일 자동 수집해 신규/종료 감지, 생존 기간,
+비주얼 패턴 분석 등 **Fact 기반 데이터**를 제공하는 광고 소재 인텔리전스 웹 서비스. 자세한 제품 요구사항은
+[`PRD.MD`](./PRD.MD), 핵심 데이터 개념(Baseline/이벤트/수집 상태 등)은 [`docs/DATA_SEMANTICS.md`](./docs/DATA_SEMANTICS.md) 참고.
 
 ## 폴더 구조
 
@@ -68,3 +69,16 @@ Meta Ad Library 스크래핑은 Apify의 `curious_coder/facebook-ads-library-scr
 Celery/Redis 대신 `apps/api/scripts/run_daily_collection.py` 스크립트를 매일 1회 실행하는 방식을
 기본값으로 채택했습니다. `.github/workflows/daily-collect.yml`에 GitHub Actions cron 예시가 있습니다
 (GitHub repo secrets에 위 자격증명을 등록하면 바로 동작).
+
+## DB 스키마 변경 시 주의
+
+`apps/api/app/main.py`는 기동 시 `Base.metadata.create_all()`을 실행하지만, 이는 **존재하지 않는
+테이블만 생성**하며 이미 존재하는 테이블에 새 column을 추가해주지 않습니다. 이미 배포된(Supabase 등)
+DB에 스키마 변경을 반영하려면 `apps/api/db/migrations/`의 additive migration을 직접 실행하세요:
+
+```bash
+psql "$DATABASE_URL" -f apps/api/db/migrations/001_product_stabilization.sql
+```
+
+신규 마이그레이션을 추가할 때도 `ADD COLUMN IF NOT EXISTS` 등 기존 데이터를 보존하는 additive 방식만
+사용하고, `apps/api/db/schema.sql`(신규 DB 기준 최신 스키마)도 함께 갱신하세요.

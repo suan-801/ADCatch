@@ -1,27 +1,49 @@
 # ADCatcher Development & Design Rules
 
-## 1. UI & Design Guidelines
-- **Theme & Aesthetic**: Minimalist, high-density B2B SaaS layout inspired by Linear and Vercel.
-- **Color Palette**: Slate & Neutral tones (`#0F172A`, `#1E293B`, `#F8FAFC`). Pure white backgrounds with subtle 1px border lines (`#E2E8F0`).
-- **Gradients & AI Artifacts**: Strictly FORBIDDEN to use generic AI blue/purple gradients, overly rounded corners, or decorative hero cards.
-- **Status Badges**:
-  - `New`: Muted Blue (`#3B82F6`)
-  - `Active`: Muted Green (`#22C55E`)
-  - `Inactive`: Muted Gray (`#64748B`)
-- **Pixel Assistant (Catcher)**:
-  - Render with CSS `image-rendering: pixelated;`.
-  - Positioned at the bottom-right of the viewport.
-  - Show contextual onboarding tooltips and daily change alerts.
+이 문서가 outdated되면 실제 코드/`docs/DATA_SEMANTICS.md`가 우선한다. 데이터 의미(Brand/Baseline/
+이벤트/수집 상태)는 이 파일이 아니라 `docs/DATA_SEMANTICS.md`를 기준으로 삼는다.
 
-## 2. Architecture & Simplification
-- **Auth**: Authentication is bypassed in MVP. Use a default fallback user (`default_admin`) for all database operations.
-- **Auto-Pause (14-Day Inactivity)**:
-  - Update `users.last_accessed_at` on any user interaction or dashboard load.
-  - If `NOW() - last_accessed_at > 14 days`, scheduler skips collection for that project.
-- **Data Pruning**:
-  - Ads inactive for >14 consecutive days are archived from active tracking.
+## 1. Product 개념 — "브랜드" (자사/경쟁사 구분 없음)
 
-## 3. Code Quality
-- Use Type Hints in Python (`pydantic`, `typing`).
-- Keep frontend components modular, tight, and high-density.
-- Prioritize clear tables, metrics cards, and grid galleries over narrative text.
+Project 안에 등록되는 모든 추적 대상은 동일한 **"브랜드"**다. "자사"와 "경쟁사"를 구분하는
+UI/문구/business logic을 새로 추가하지 않는다(과거 `is_own_brand` 플래그는 DB에 deprecated
+상태로만 남아있고, 신규 로직에서는 참조하지 않는다). Dashboard, Live Gallery, Daily Changes,
+Visual Pattern, Collection Freshness, 자동 수집 — 모든 곳에서 브랜드를 동등하게 취급한다.
+
+## 2. UI & Design Guidelines — 화면마다 톤이 다르다
+
+**Landing Page**(수정 대상 아님 — 참고만):
+- Orange 중심, 큰 3D 캐쳐, 큰 타이포그래피/그래픽, 짧은 브랜드 스토리텔링.
+
+**Product 화면**(Dashboard, Daily Changes 등 — 70% 전문 업무 툴 + 30% ADCatcher personality):
+- 배경: White / warm-white. 포인트: Orange accent. 타이포: Dark navy.
+- 광고 소재(creative) 이미지를 최우선으로 보여준다 — 넉넉한 여백, 명확한 위계, 카드는 절제해서 사용.
+- 지양: 제네릭 AI 그라데이션, 과도한 둥근 카드, 글래스모피즘, 지나치게 작고 빽빽한 텍스트,
+  분석 UI 안의 불필요한 3D 장식.
+- **Status Badges**: `New` 옅은 파랑, `Active` 옅은 초록, `Inactive` 옅은 회색 — 의미 유지, 톤은 절제.
+- **광고 크리에이티브 썸네일**은 crop(`object-cover`)하지 않는 것을 우선한다. 소재 속 작은 카피까지
+  보여야 하므로 `object-contain` + 중립 배경을 기본으로 쓴다.
+
+**Pixel Assistant ("캐쳐")**:
+- CSS `image-rendering: pixelated;`, 화면 우측 하단 상주.
+- 챗봇처럼 매번 자동으로 말풍선을 열지 않는다 — 기본은 닫힘. 온보딩/Baseline 완료/신규 변화 감지/
+  수집 완료·실패/의미 있는 empty state 같은 맥락에서만 자동으로 연다.
+
+## 3. Architecture & Simplification
+
+- **Auth**: MVP에서는 인증을 생략하고 `default_admin` fallback user를 사용한다.
+- **Auto-Pause (14일 미접속)**: `users.last_accessed_at` 갱신, 14일 초과 시 스케줄러가 해당
+  프로젝트 수집을 skip한다.
+- **Baseline**: "첫 수집"이 아니라 "첫 COMPLETE SUCCESSFUL SNAPSHOT"이 Baseline이다. PARTIAL(예:
+  max_ads 상한 도달)은 baseline을 확정하지 않는다 — 자세한 규칙은 `docs/DATA_SEMANTICS.md` 참고.
+- **Data Pruning**: INACTIVE 전환 후 14일 연속 미노출 소재는 추적 대상에서 아카이빙.
+- **DB 마이그레이션**: 서버 기동 시 `Base.metadata.create_all()`은 기존 테이블에 새 column을
+  추가해주지 않는다. 스키마 변경 시 `apps/api/db/schema.sql`(신규 DB 기준)과
+  `apps/api/db/migrations/*.sql`(기존 DB에 적용할 additive `ADD COLUMN IF NOT EXISTS`)를 함께 갱신한다.
+
+## 4. Code Quality
+
+- Python은 Type Hints(`pydantic`, `typing`)를 사용한다.
+- API 계약(backend schemas ↔ frontend `lib/types.ts`)은 항상 동기화한다 — 한쪽만 필드를 추가하고
+  다른 쪽을 갱신하지 않는 PR을 만들지 않는다.
+- 프론트 컴포넌트는 모듈화하고, Ad Card처럼 이미지 우선 구조를 재사용한다.

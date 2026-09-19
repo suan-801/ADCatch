@@ -17,6 +17,8 @@ export interface Competitor {
   name: string;
   ad_library_url: string;
   page_id: string | null;
+  // DEPRECATED — Brand Model Simplification 이후 UI/집계 어디에서도 사용하지 않는다.
+  // 하위호환을 위해 API 응답에는 남아있다.
   is_own_brand: boolean;
   created_at: string;
 }
@@ -77,6 +79,8 @@ export type CollectionStatus = "SUCCESS" | "PARTIAL" | "FAILED" | "NO_RECORD";
 export interface ChangedAd extends Ad {
   event_type: AdChangeEventType;
   competitor_name: string;
+  // P1-01: 이 이벤트가 발생한 순간에 고정된 집행/추적 일수. null이면(구 이벤트) 라이브 계산으로 폴백.
+  survival_days_at_event: number | null;
 }
 
 export interface AdChangeSummary {
@@ -85,11 +89,20 @@ export interface AdChangeSummary {
   stopped: number;
 }
 
+// P0-15: 프로젝트 단위 하나의 값으로 뭉개지 않고, 브랜드별 상태 분포를 함께 제공한다.
+export interface CollectionStatusSummary {
+  success: number;
+  partial: number;
+  failed: number;
+  no_record: number;
+}
+
 export interface AdChangesResponse {
   project_id: string;
   date: string;
   competitor_id: string | null;
   collection_status: CollectionStatus;
+  collection_summary: CollectionStatusSummary;
   history_available_from: string | null;
   baseline_discovered_count: number;
   summary: AdChangeSummary;
@@ -103,8 +116,33 @@ export interface CollectionFreshness {
   project_id: string;
   latest_run_at: string | null;
   total_competitors: number;
+  // 하위호환: SUCCESS + PARTIAL 합계.
   healthy_competitors: number;
+  // P0-16: PARTIAL을 SUCCESS와 동일하게 표시하지 않기 위한 세부 분해.
+  success_competitors: number;
+  partial_competitors: number;
+  partial_competitor_names: string[];
   failed_competitor_names: string[];
+}
+
+// P0-16: "오늘"을 하드코딩하지 않고 실제 날짜 관계(오늘/어제/그 이전)를 KST 기준으로 표시한다.
+export function formatRelativeKstTime(iso: string): string {
+  const d = new Date(iso);
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const time = `${String(kst.getUTCHours()).padStart(2, "0")}:${String(kst.getUTCMinutes()).padStart(2, "0")}`;
+
+  const dateStr = kst.toISOString().slice(0, 10);
+  const today = todayKst();
+  const yesterday = (() => {
+    const t = new Date(Date.now() + 9 * 60 * 60 * 1000);
+    t.setUTCDate(t.getUTCDate() - 1);
+    return t.toISOString().slice(0, 10);
+  })();
+
+  if (dateStr === today) return `오늘 ${time}`;
+  if (dateStr === yesterday) return `어제 ${time}`;
+  const [, month, day] = dateStr.split("-");
+  return `${Number(month)}월 ${Number(day)}일 ${time}`;
 }
 
 export interface SyncResult {

@@ -27,6 +27,7 @@ from app.schemas import (
     ChangedAdOut,
     CollectionFreshness,
     CollectionStatus,
+    CollectionStatusSummary,
 )
 
 KST = timezone(timedelta(hours=9))
@@ -63,6 +64,7 @@ def record_event(
     event_date: date,
     previous_status: str | None,
     new_status: str,
+    survival_days_at_event: int | None = None,
 ) -> None:
     db.add(
         AdStatusEvent(
@@ -73,6 +75,7 @@ def record_event(
             event_date=event_date,
             previous_status=previous_status,
             new_status=new_status,
+            survival_days_at_event=survival_days_at_event,
         )
     )
 
@@ -97,12 +100,25 @@ def complete_collection_run_partial(db: Session, run: CollectionRun, fetched_ads
 def _competitor_ids_for_scope(db: Session, project_id: uuid.UUID, competitor_id: uuid.UUID | None) -> list[uuid.UUID]:
     if competitor_id is not None:
         return [competitor_id]
-    # 자사(own brand) 소재는 기존 dashboard 집계와 동일하게 제외한다.
-    return list(
-        db.scalars(
-            select(Competitor.id).where(Competitor.project_id == project_id, Competitor.is_own_brand.is_(False))
-        ).all()
-    )
+    # P0-18/P0-19: Brand Model Simplification — Project 안의 모든 등록 브랜드는 동일하게 취급된다.
+    # is_own_brand 기준 제외는 더 이상 하지 않는다.
+    return list(db.scalars(select(Competitor.id).where(Competitor.project_id == project_id)).all())
+
+
+def _collection_status_for_competitor_on_date(db: Session, competitor_id: uuid.UUID, target_date: date) -> CollectionStatus:
+    statuses = db.scalars(
+        select(CollectionRun.status).where(
+            CollectionRun.competitor_id == competitor_id,
+            CollectionRun.run_date == target_date,
+        )
+    ).all()
+    if any(s == "SUCCESS" for s in statuses):
+        return CollectionStatus.SUCCESS
+    if any(s == "PARTIAL" for s in statuses):
+        return CollectionStatus.PARTIAL
+    if any(s == "FAILED" for s in statuses):
+        return CollectionStatus.FAILED
+    return CollectionStatus.NO_RECORD
 
 
 def get_ad_changes(
@@ -119,6 +135,7 @@ def get_ad_changes(
             date=target_date,
             competitor_id=competitor_id,
             collection_status=CollectionStatus.NO_RECORD,
+            collection_summary=CollectionStatusSummary(success=0, partial=0, failed=0, no_record=0),
             history_available_from=None,
             baseline_discovered_count=0,
             summary=AdChangeSummary(started=0, reactivated=0, stopped=0),
@@ -128,22 +145,25 @@ def get_ad_changes(
             visual_pattern={},
         )
 
-    # 1) 이 날짜의 수집 상태 (성공/부분성공/실패/기록없음) — backend에서 날짜 필터링 처리.
-    # SUCCESS가 하나라도 있으면 SUCCESS로, 아니면 PARTIAL, 아니면 FAILED 순으로 우선한다.
-    runs_today = db.scalars(
-        select(CollectionRun).where(
-            CollectionRun.competitor_id.in_(competitor_ids),
-            CollectionRun.run_date == target_date,
-        )
-    ).all()
-    if any(r.status == "SUCCESS" for r in runs_today):
+    # 1) 이 날짜의 수집 상태 — P0-15: 브랜드가 여럿일 때 "하나라도 SUCCESS면 전체 SUCCESS"로
+    # 뭉개지 않는다. 브랜드별 상태를 먼저 구하고, 전부 같을 때만 그 상태로, 섞여 있으면 PARTIAL로 집계한다.
+    per_competitor_status = [_collection_status_for_competitor_on_date(db, cid, target_date) for cid in competitor_ids]
+    status_counts = Counter(per_competitor_status)
+    total = len(per_competitor_status)
+    collection_summary = CollectionStatusSummary(
+        success=status_counts.get(CollectionStatus.SUCCESS, 0),
+        partial=status_counts.get(CollectionStatus.PARTIAL, 0),
+        failed=status_counts.get(CollectionStatus.FAILED, 0),
+        no_record=status_counts.get(CollectionStatus.NO_RECORD, 0),
+    )
+    if collection_summary.success == total:
         collection_status = CollectionStatus.SUCCESS
-    elif any(r.status == "PARTIAL" for r in runs_today):
-        collection_status = CollectionStatus.PARTIAL
-    elif any(r.status == "FAILED" for r in runs_today):
+    elif collection_summary.failed == total:
         collection_status = CollectionStatus.FAILED
-    else:
+    elif collection_summary.no_record == total:
         collection_status = CollectionStatus.NO_RECORD
+    else:
+        collection_status = CollectionStatus.PARTIAL
 
     history_available_from = db.scalar(
         select(sa_func.min(CollectionRun.run_date)).where(CollectionRun.competitor_id.in_(competitor_ids))
@@ -190,6 +210,7 @@ def get_ad_changes(
             is_archived=ad.is_archived,
             event_type=event.event_type,
             competitor_name=competitor_name,
+            survival_days_at_event=event.survival_days_at_event,
         )
         if event.event_type == AdChangeEventType.STARTED.value:
             started.append(changed)
@@ -207,6 +228,7 @@ def get_ad_changes(
         date=target_date,
         competitor_id=competitor_id,
         collection_status=collection_status,
+        collection_summary=collection_summary,
         history_available_from=history_available_from,
         baseline_discovered_count=baseline_count,
         summary=AdChangeSummary(started=len(started), reactivated=len(reactivated), stopped=len(stopped)),
@@ -218,14 +240,15 @@ def get_ad_changes(
 
 
 def get_freshness_summary(db: Session, project_id: uuid.UUID) -> CollectionFreshness:
-    """P0-09: 프로젝트 헤더 근처에 표시할 데이터 신뢰도 요약 — 각 경쟁사의 "가장 최근" 수집
-    시도만 보고 판단한다 (오래된 실패 이력이 최신 성공을 가리지 않도록)."""
-    competitors = db.scalars(
-        select(Competitor).where(Competitor.project_id == project_id, Competitor.is_own_brand.is_(False))
-    ).all()
+    """P0-09/P0-16: 프로젝트 헤더 근처에 표시할 데이터 신뢰도 요약 — 각 브랜드의 "가장 최근" 수집
+    시도만 보고 판단한다 (오래된 실패 이력이 최신 성공을 가리지 않도록). P0-18/19: is_own_brand로
+    제외하지 않고 프로젝트 내 모든 브랜드를 대상으로 한다."""
+    competitors = db.scalars(select(Competitor).where(Competitor.project_id == project_id)).all()
 
     latest_run_at: datetime | None = None
-    healthy = 0
+    success = 0
+    partial = 0
+    partial_names: list[str] = []
     failed_names: list[str] = []
 
     for c in competitors:
@@ -240,8 +263,11 @@ def get_freshness_summary(db: Session, project_id: uuid.UUID) -> CollectionFresh
             continue
         if latest_run.completed_at and (latest_run_at is None or latest_run.completed_at > latest_run_at):
             latest_run_at = latest_run.completed_at
-        if latest_run.status in ("SUCCESS", "PARTIAL"):
-            healthy += 1
+        if latest_run.status == "SUCCESS":
+            success += 1
+        elif latest_run.status == "PARTIAL":
+            partial += 1
+            partial_names.append(c.name)
         else:
             failed_names.append(c.name)
 
@@ -249,6 +275,9 @@ def get_freshness_summary(db: Session, project_id: uuid.UUID) -> CollectionFresh
         project_id=project_id,
         latest_run_at=latest_run_at,
         total_competitors=len(competitors),
-        healthy_competitors=healthy,
+        healthy_competitors=success + partial,
+        success_competitors=success,
+        partial_competitors=partial,
+        partial_competitor_names=partial_names,
         failed_competitor_names=failed_names,
     )

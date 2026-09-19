@@ -24,16 +24,20 @@ CREATE TABLE IF NOT EXISTS projects (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- 3. Competitors Table
+-- 3. Competitors Table ("추적 브랜드" — Brand Model Simplification, 2026-09)
 CREATE TABLE IF NOT EXISTS competitors (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
     name VARCHAR(100) NOT NULL,
     ad_library_url TEXT NOT NULL,
     page_id VARCHAR(100),
-    -- PRD 3.1: 프로젝트(워크스페이스) = 자사 1 + 경쟁사 N. 자사도 동일 테이블의 row로 등록하되
-    -- 대시보드 신규/종료 카운트·갤러리 집계에서는 제외한다.
+    -- DEPRECATED: 자사/경쟁사 구분은 더 이상 business logic에서 사용하지 않는다(모든 등록 브랜드를
+    -- 동일하게 집계). 기존 데이터 보존을 위해 column만 유지한다.
     is_own_brand BOOLEAN DEFAULT FALSE,
+    -- P0-08: "첫 수집"이 아니라 "첫 COMPLETE SUCCESSFUL SNAPSHOT"이 Baseline이다. NULL이면
+    -- 아직 baseline 미확정(PARTIAL만 있었거나 수집 이력 없음) — 이 상태에선 STARTED/STOPPED/
+    -- REACTIVATED 이벤트를 생성하지 않는다.
+    baseline_completed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -44,6 +48,9 @@ CREATE TABLE IF NOT EXISTS ads (
     ad_archive_id VARCHAR(100) NOT NULL UNIQUE,
     first_seen_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     last_seen_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    -- 소재상의 실제 집행 시작일(모르면 NULL) — ADCatcher가 처음 관측한 first_seen_at과는 별개 개념.
+    -- 있으면 "집행 N일", 없으면 "추적 N일"로 표시한다.
+    source_started_at TIMESTAMPTZ,
     status VARCHAR(20) DEFAULT 'NEW', -- 'NEW', 'ACTIVE', 'INACTIVE'
     visual_type VARCHAR(50), -- 'PERSON', 'PRODUCT', 'TEXT_HEAVY', 'GRAPHIC'
     format VARCHAR(20), -- 'IMAGE', 'VIDEO', 'CAROUSEL'
@@ -53,6 +60,12 @@ CREATE TABLE IF NOT EXISTS ads (
     consecutive_inactive_days INT DEFAULT 0,
     -- PRD 3.3: INACTIVE 전환 후 14일 연속 미노출 시 수집 대상 스케줄러에서 아카이빙 처리.
     is_archived BOOLEAN DEFAULT FALSE,
+    -- Gemini/썸네일 캐싱(enrichment)은 수집(core data)과 완전히 분리된 상태로 추적한다 — 분석이
+    -- 실패해도 ads row 자체는 항상 정상 생성/유지된다.
+    analysis_status VARCHAR(20) DEFAULT 'PENDING', -- 'PENDING', 'SUCCESS', 'FAILED'
+    analysis_retry_count INT DEFAULT 0,
+    analysis_error TEXT,
+    analyzed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -72,7 +85,9 @@ CREATE TABLE IF NOT EXISTS collection_runs (
     started_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     completed_at TIMESTAMPTZ,
     run_date DATE NOT NULL, -- KST(Asia/Seoul) 캘린더 날짜로 시작 시점에 고정
-    status VARCHAR(20) NOT NULL DEFAULT 'RUNNING', -- 'RUNNING', 'SUCCESS', 'FAILED'
+    -- 'PARTIAL' = fetch는 성공했지만 max_ads 상한 도달로 전체 스냅샷을 보장할 수 없음(P0-02).
+    -- PARTIAL인 run은 STOPPED 판정이나 baseline 확정에 사용되지 않는다.
+    status VARCHAR(20) NOT NULL DEFAULT 'RUNNING', -- 'RUNNING', 'SUCCESS', 'PARTIAL', 'FAILED'
     fetched_ads_count INT,
     error_message TEXT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
@@ -95,10 +110,13 @@ CREATE TABLE IF NOT EXISTS ad_status_events (
     ad_id UUID REFERENCES ads(id) ON DELETE CASCADE,
     competitor_id UUID REFERENCES competitors(id) ON DELETE CASCADE,
     collection_run_id UUID REFERENCES collection_runs(id) ON DELETE CASCADE,
-    event_type VARCHAR(20) NOT NULL, -- 'STARTED', 'STOPPED', 'REACTIVATED'
+    event_type VARCHAR(20) NOT NULL, -- 'STARTED', 'STOPPED', 'REACTIVATED', 'BASELINE_DISCOVERED'
     event_date DATE NOT NULL,
     previous_status VARCHAR(20),
     new_status VARCHAR(20) NOT NULL,
+    -- P1-01: 이벤트 발생 시점에 고정한 집행/추적 일수(historical immutability). 이후 ad row가
+    -- 갱신돼도 이 값은 바뀌지 않는다. 이 컬럼 도입 이전 이벤트는 NULL(fake backfill 금지).
+    survival_days_at_event INT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 

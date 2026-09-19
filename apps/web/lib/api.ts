@@ -24,7 +24,8 @@ export const api = {
 
   listCompetitors: (projectId: string) =>
     request<Competitor[]>(`/projects/${projectId}/competitors`),
-  createCompetitor: (projectId: string, payload: { name: string; ad_library_url: string; is_own_brand?: boolean }) =>
+  // P0-20/P0-21: 새 클라이언트는 is_own_brand를 보내지 않는다(브랜드 구분 UI 제거).
+  createCompetitor: (projectId: string, payload: { name: string; ad_library_url: string }) =>
     request<Competitor>(`/projects/${projectId}/competitors`, {
       method: "POST",
       body: JSON.stringify(payload),

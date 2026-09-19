@@ -66,7 +66,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
           <div className="min-w-0">
             <h1 className="truncate text-xl font-extrabold text-foreground">{currentProject?.name ?? " "}</h1>
-            <p className="text-xs text-muted">경쟁사 광고 현황</p>
+            <p className="text-xs text-muted">브랜드 광고 현황</p>
             {projectId && (
               <div className="mt-1.5">
                 <CollectionFreshnessBadge projectId={projectId} />
