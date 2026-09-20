@@ -14,9 +14,9 @@ import { useEffect, useRef, useState } from "react";
 type Artwork = { src: string; alt: string; caption: string };
 
 const ARTWORKS: Artwork[] = [
-  { src: "/landing/gallery/catcher-monalisa.png", alt: "모나리자로 재해석된 캐쳐", caption: "MONA" },
-  { src: "/landing/gallery/catcher-pearl.png", alt: "진주 귀걸이를 한 소녀로 재해석된 캐쳐", caption: "PEARL" },
-  { src: "/landing/gallery/catcher-vangogh.png", alt: "반 고흐로 재해석된 캐쳐", caption: "VAN GOGH" },
+  { src: "/landing/gallery/catcher-monalisa.webp", alt: "모나리자로 재해석된 캐쳐", caption: "MONA" },
+  { src: "/landing/gallery/catcher-pearl.webp", alt: "진주 귀걸이를 한 소녀로 재해석된 캐쳐", caption: "PEARL" },
+  { src: "/landing/gallery/catcher-vangogh.webp", alt: "반 고흐로 재해석된 캐쳐", caption: "VAN GOGH" },
 ];
 
 function useRevealOnScroll() {

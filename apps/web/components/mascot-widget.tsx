@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 
 // PRD.MD 5.2 픽셀 도트 비서 캐릭터("캐쳐") — 제품 화면에서는 우측 하단 상주, image-rendering: pixelated.
-// 랜딩 Hero의 3D 렌더 캐쳐(catcher-hero.png)와는 의도적으로 다른 스타일: 브랜드 주인공(랜딩) vs
+// 랜딩 Hero의 3D 렌더 캐쳐(catcher-hero.webp)와는 의도적으로 다른 스타일: 브랜드 주인공(랜딩) vs
 // 작은 UX 가이드(제품)라는 역할 차이를 시각적으로도 구분한다.
 //
 // 순수 표시 컴포넌트로 유지한다 — 어떤 메시지를 보여줄지는 호출부(현재 현황 페이지 / 날짜별
@@ -51,7 +51,7 @@ export function MascotWidget({
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           key={String(openSignal ?? "")}
-          src={happy ? "/mascot/Catcher_happy.png" : "/mascot/Catcher.png"}
+          src={happy ? "/mascot/catcher-happy.png" : "/mascot/catcher.png"}
           alt="캐쳐"
           className="pixelated h-full w-full object-contain motion-safe:animate-pop-in"
         />

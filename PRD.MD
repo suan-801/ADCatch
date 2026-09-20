@@ -51,8 +51,8 @@
 | **온보딩** | **Initial Baseline + Daily Catch Opt-in** | 브랜드 등록 후 첫 완전한 성공 수집이 Baseline이 되며(`docs/DATA_SEMANTICS.md` §3), Baseline 완료 시에만 "매일 변화 CATCH하기" opt-in CTA를 노출 |
 | **변화 추적** | **Daily Ad Change History** | 날짜 × 브랜드 기준으로 그 날 켠(STARTED/REACTIVATED)/끈(STOPPED) 광고와 비주얼 패턴을 조회 |
 | **신뢰도 표시** | **Collection Freshness** | 프로젝트의 브랜드별 최신 수집 상태(정상/부분 수집/실패)를 헤더 근처에서 바로 보여줌 |
-| **비주얼 분석** | **Vision AI Tagging** | Gemini Vision API를 이용해 이미지 내 인물 포함 여부, 텍스트 중심 여부, 제품 중심 여부 자동 태깅 |
-| **대시보드** | **Fact Metrics & 갤러리** | 신규/종료/유지 개수 카드, 비주얼 포맷 비율 차트, 카드형 라이브 광고 갤러리(생존기간 순 정렬) 제공 |
+| **비주얼 분석** | **Vision AI Tagging** | Gemini Vision API를 이용해 이미지 내 인물 포함 여부, 텍스트 중심 여부, 제품 중심 여부 자동 태깅. 신규 소재는 수집 즉시 1차 분석하고, quota/일시 오류로 `PENDING`으로 남은 소재는 Daily Scheduler 마지막 단계(`process_pending_analysis`)가 별도로 재시도한다 — Gemini 실패는 Core Collection의 성공 여부와 완전히 독립적이다. `SUCCESS`로 확정된 소재는 다시 분석하지 않는다. |
+| **대시보드** | **Fact Metrics & 갤러리** | 신규/종료/유지 개수 카드, 비주얼 포맷 비율 차트, 카드형 라이브 광고 갤러리(생존기간 순 정렬) 제공. 갤러리에는 Brand 외에 Status/Format/Visual/카피 검색 필터가 있고, 카드를 클릭하면 Ad Detail Drawer(집행/추적 일수, 변화 이력, Meta 원본 링크 등)가 열린다. |
 | **알림** | **Teams Webhook Alert** | 수집 완료 후 Microsoft Teams 채널로 당일 신규(STARTED 기준)/종료 소재 수치 및 최고 장수 소재 요약 알림 전송 |
 | **온보딩/안내** | **Pixel Assistant Guide** | 우측 하단 상주 도트 비서 캐릭터("캐쳐")가 의미 있는 순간(온보딩/Baseline 완료/신규 변화/수집 완료·실패)에만 말풍선을 열어 안내 |
 
@@ -67,6 +67,7 @@
   * Background: White / Warm White (`#F8FAFC`)
   * Border: Thin 1px Line (`#E2E8F0`)
   * Status Badges: Muted Blue (`New`), Muted Green (`Active`), Muted Gray (`Inactive`)
+* **Asset 정책:** 로고/아이콘은 (진짜 vector인 경우에만) SVG, 3D 렌더 캐쳐·아트워크는 WebP/AVIF를 사용한다. 상세 규칙은 `docs/ASSET_GUIDE.md` 참고.
 * 상세 규칙은 `.cursorrules` 참고.
 
 ### 5.2 픽셀 도트 비서 캐릭터 (캐쳐)
@@ -87,3 +88,27 @@
 * **AI Engine:** Google Gemini Vision API (비주얼 태깅)
 * **Scheduler:** Celery + Redis 또는 GitHub Actions / Cloud Scheduler
 * **Alert:** Microsoft Teams Incoming Webhook
+
+---
+
+## 7. Future / Deployment
+
+현재 MVP의 수집 트리거(`POST /competitors/{id}/ads/collect`)는 **동기(synchronous) HTTP
+요청** 하나 안에서 Apify 호출 → DB 동기화 → Storage 캐싱 → Gemini 태깅까지 전부 끝낸다.
+로컬/사내 배포 단계에서는 문제가 없지만, serverless/cloud 환경에 배포하면 요청 timeout 위험이
+있다. 이번 정리에서는 이 아키텍처를 바꾸지 않았고(job queue/background worker/polling으로의
+전환은 범위 밖), 향후 다음 방향으로 전환하는 것을 권장한다:
+
+```
+POST /collect
+  ↓ collection_run_id를 즉시 반환
+  ↓ durable worker(GitHub Actions / Supabase Edge / Queue 등, 배포 시점에 선택)가 실제 수집 실행
+  ↓ Frontend는 GET /collection-runs/{id}를 폴링 (RUNNING/SUCCESS/PARTIAL/FAILED)
+```
+
+fire-and-forget 백그라운드 스레드에 의존하지 않고, 상태를 항상 DB(`collection_runs`)에서
+조회 가능한 형태로 유지하는 것이 핵심이다.
+
+같은 맥락에서, Project 전체 추적 광고 수가 커지면(예: 약 200개 이상) 대규모 추적에 대한
+안내/과금 정책이 필요해질 수 있다 — 다만 특정 개수에서 수집을 차단하는 hard limit은 아직
+만들지 않는다.

@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     # 순차 처리 시 광고 수가 많은 브랜드는 수집 1회에 수 분~수십 분이 걸릴 수 있어 병렬화했다.
     media_enrichment_concurrency: int = 8
 
+    # Part A — Gemini Pending Analysis Retry. 한 번의 재시도 배치에서 처리할 PENDING 소재 상한
+    # (Gemini Free Tier RPD는 모델/계정마다 다르므로 하드코딩하지 않고 여기서만 조정한다).
+    gemini_pending_batch_size: int = 20
+    # 이 횟수만큼 재시도해도 계속 실패하면(quota 제외) analysis_status=FAILED로 확정한다.
+    gemini_analysis_max_retries: int = 3
+
     teams_webhook_url: str = ""
 
     default_admin_email: str = "admin@company.com"

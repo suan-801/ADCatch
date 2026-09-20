@@ -47,3 +47,20 @@ Visual Pattern, Collection Freshness, 자동 수집 — 모든 곳에서 브랜�
 - API 계약(backend schemas ↔ frontend `lib/types.ts`)은 항상 동기화한다 — 한쪽만 필드를 추가하고
   다른 쪽을 갱신하지 않는 PR을 만들지 않는다.
 - 프론트 컴포넌트는 모듈화하고, Ad Card처럼 이미지 우선 구조를 재사용한다.
+
+## 5. Asset policy
+
+- Logo/icon → SVG (단, `<image href="data:...base64">`로 raster를 감싸기만 한 파일은 "최적화된
+  SVG"로 취급하지 않는다 — 실제 `<path>`/`<rect>` 등 vector 요소로 구성됐는지 열어서 확인한다).
+- 3D 렌더 캐쳐/명화 재해석 같은 photo-like art → WebP/AVIF.
+- Product 화면의 작은 pixel 마스코트 아이콘은 PNG/WebP 둘 다 허용 — 형식보다 실제 렌더 크기에
+  맞춘 dimension이 더 중요하다.
+- Asset은 의미 단위 public 폴더(`brand/`, `mascot/`, `landing/gallery/`, `icons/`)에 두고,
+  파일명은 lowercase kebab-case로 통일한다. 상세 규칙은 `docs/ASSET_GUIDE.md` 참고.
+
+## 6. Gemini Vision 분석
+
+- `analysis_status=SUCCESS`인 광고는 어떤 경로로도 다시 자동 분석하지 않는다.
+- `PENDING`은 `app.services.pending_analysis`가 별도 배치로 재시도한다(신규 소재 수집 흐름과는
+  분리). Gemini 실패/quota 초과가 Core Collection(수집 자체)을 무효화하지 않는다.
+- 상세: `docs/DATA_SEMANTICS.md` §8.

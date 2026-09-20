@@ -104,6 +104,9 @@ class AdOut(BaseModel):
     source_started_at: datetime | None
     consecutive_inactive_days: int
     is_archived: bool
+    # Part C — Ad Detail Drawer: 분석 상태를 노출해 "비주얼 분석 대기/실패"를 보여줄 수 있게 한다.
+    analysis_status: str
+    analysis_error: str | None
 
     @property
     def survival_days(self) -> int:
@@ -207,6 +210,21 @@ class AdChangesResponse(BaseModel):
     reactivated_ads: list[ChangedAdOut]
     stopped_ads: list[ChangedAdOut]
     visual_pattern: dict[str, int]
+
+
+class AdHistoryEvent(BaseModel):
+    """Part C-03 — Ad Detail Drawer의 event history 한 줄."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    event_type: AdChangeEventType
+    event_date: date
+    survival_days_at_event: int | None = None
+
+
+class AdHistoryResponse(BaseModel):
+    ad_id: uuid.UUID
+    events: list[AdHistoryEvent]
 
 
 class CollectionFreshness(BaseModel):

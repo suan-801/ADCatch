@@ -10,7 +10,9 @@ import { CompetitorPanel } from "@/components/competitor-panel";
 import { CompetitorFilter } from "@/components/daily-changes/competitor-filter";
 import { TodayCatch } from "@/components/today-catch";
 import { VisualFormatChart } from "@/components/visual-format-chart";
-import { AdGallery } from "@/components/ad-gallery";
+import { AdGallery } from "@/components/gallery/ad-gallery";
+import { GalleryFilters, DEFAULT_GALLERY_FILTERS, applyGalleryFilters } from "@/components/gallery/gallery-filters";
+import { AdDetailDrawer } from "@/components/gallery/ad-detail-drawer";
 import { MascotWidget } from "@/components/mascot-widget";
 import { BaselineCTA } from "@/components/baseline-cta";
 
@@ -34,6 +36,8 @@ export default function CurrentDashboardPage() {
   const [ads, setAds] = useState<(Ad & { competitor_name?: string })[]>([]);
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [galleryFilters, setGalleryFilters] = useState(DEFAULT_GALLERY_FILTERS);
+  const [selectedAd, setSelectedAd] = useState<(Ad & { competitor_name?: string }) | null>(null);
   // Initial Baseline + Daily Catch Opt-in UX — 방금 완료된 baseline 수집에 대한 CTA(있으면).
   const [baselineCta, setBaselineCta] = useState<{
     competitorName: string;
@@ -126,6 +130,8 @@ export default function CurrentDashboardPage() {
 
   const handleOptIn = () => updateAutoCollect(true);
 
+  const filteredAds = applyGalleryFilters(ads, galleryFilters);
+
   const todayStartedCount = (todayChanges?.summary.started ?? 0) + (todayChanges?.summary.reactivated ?? 0);
 
   const mascotMessage = collecting
@@ -184,12 +190,19 @@ export default function CurrentDashboardPage() {
 
       <section>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          {/* B-07: 필터가 걸려있으면 "필터결과 / 전체"로, 아니면 전체 개수만 보여준다. */}
           <h2 className="text-lg font-bold text-foreground">
-            라이브 소재 갤러리 <span className="ml-1 text-sm font-medium text-muted">{ads.length}</span>
+            라이브 소재 갤러리{" "}
+            <span className="ml-1 text-sm font-medium text-muted">
+              {filteredAds.length === ads.length ? ads.length : `${filteredAds.length} / ${ads.length}`}
+            </span>
           </h2>
           <CompetitorFilter competitors={competitors} selectedId={galleryCompetitorId} onSelect={setGalleryCompetitorId} />
         </div>
-        <AdGallery ads={ads} />
+        <div className="mb-4">
+          <GalleryFilters value={galleryFilters} onChange={setGalleryFilters} />
+        </div>
+        <AdGallery ads={filteredAds} totalCount={ads.length} onCardClick={setSelectedAd} />
       </section>
 
       {metrics && (
@@ -203,6 +216,8 @@ export default function CurrentDashboardPage() {
         happy={todayStartedCount > 0 && !collecting}
         openSignal={mascotOpenSignal}
       />
+
+      <AdDetailDrawer ad={selectedAd} onClose={() => setSelectedAd(null)} />
     </div>
   );
 }

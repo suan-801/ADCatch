@@ -50,7 +50,7 @@ export function ProjectSelectSection() {
       <div className="mx-auto max-w-4xl">
         <div className="flex flex-col items-center text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/mascot/catcher-hero.png" alt="캐쳐" className="w-24 sm:w-32" />
+          <img src="/mascot/catcher-hero.webp" alt="캐쳐" className="w-24 sm:w-32" />
           <h2 className="mt-4 text-2xl font-extrabold text-foreground sm:text-4xl">
             오늘은 어떤 광고를
             <br className="sm:hidden" /> CATCH할까요?

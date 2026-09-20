@@ -126,3 +126,21 @@ N일"(ADCatcher가 처음 관측한 시점 기준) — 둘을 같은 개념처�
   이 DEFAULT는 신규 INSERT에만 적용된다).
 - Baseline CTA는 `SyncResult.is_baseline && SyncResult.snapshot_complete`일 때만 노출한다 —
   실패/부분 수집 결과는 절대 baseline 기준점으로 삼지 않는다.
+
+## 8. `Ad.analysis_status` (Gemini Vision 분석 lifecycle)
+
+| 값 | 의미 |
+|---|---|
+| `PENDING` | 아직 성공적으로 분석되지 않음 — 신규 소재의 최초 분석 실패(quota 초과 포함) 또는 아직 재시도 대상에 오르지 않은 상태. |
+| `SUCCESS` | `visual_type`이 확정됨. **이후 어떤 경로로도 다시 Gemini를 호출하지 않는다**(`app.services.pending_analysis`의 쿼리 자체가 `PENDING`만 대상으로 함). |
+| `FAILED` | `gemini_analysis_max_retries`(기본 3회)만큼 재시도했지만 계속 실패 — 더 이상 자동 재시도하지 않는다. |
+
+- Core Collection(수집)과 완전히 분리된 상태다 — 이 값이 무엇이든 `Ad` row 자체의 생성/`status`
+  (NEW/ACTIVE/INACTIVE) 판정에는 영향을 주지 않는다(P0-07).
+- `analysis_status=PENDING`이어도 Gallery에는 정상 노출된다. 다만 Visual Pattern
+  집계(`visual_type_ratio`, Daily Changes의 `visual_pattern`)에는 `visual_type`이 있는
+  소재만 포함되므로 자연히 제외된다.
+- 재시도는 신규 수집 흐름(`ad_sync.synchronize_ad_status`)이 아니라 별도 배치
+  (`app.services.pending_analysis.process_pending_analysis`)가 담당하며, Daily
+  Scheduler(`scripts/run_daily_collection.py`)가 매 회차 마지막 단계에서 호출한다. 이 배치가
+  실패해도 그 회차의 Core Collection 결과(이미 commit됨)는 되돌리지 않는다.

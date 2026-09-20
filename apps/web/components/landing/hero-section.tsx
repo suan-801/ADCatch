@@ -8,7 +8,7 @@ export function HeroSection() {
 
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src="/mascot/catcher-hero.png"
+        src="/mascot/catcher-hero.webp"
         alt="캐쳐"
         className="relative z-10 w-56 animate-float drop-shadow-2xl sm:w-72 md:w-80"
       />

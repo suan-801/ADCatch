@@ -8,6 +8,9 @@ GitHub Actions/Cloud Scheduler" 중 후자를 단순화 목적으로 선택).
   1) apply_auto_pause() — 14일 미접속 프로젝트를 PAUSED로 전환, 이번 회차 스킵 대상 산출
   2) ACTIVE 프로젝트의 각 경쟁사에 대해 fetch_live_ads → synchronize_ad_status
   3) 프로젝트 단위로 Teams 알림 발송
+  4) Part A — Pending Gemini Analysis Retry: 위 Daily Collection이 전부 끝난 뒤, 이전
+     수집들에서 PENDING으로 남아있던 소재를 별도 step으로 재시도한다. 이 step은 Core
+     Collection과 완전히 분리되어 있어(A-07), 실패해도 위 1~3단계 결과에 영향을 주지 않는다.
 
 사용법:
   cd apps/api && python -m scripts.run_daily_collection
@@ -28,6 +31,7 @@ from app.services import collection_history, teams_alert
 from app.services.ad_library_collector import ApifyRunError, fetch_live_ads
 from app.services.ad_sync import synchronize_ad_status
 from app.services.autopause import apply_auto_pause
+from app.services.pending_analysis import process_pending_analysis
 
 
 def run() -> None:
@@ -73,6 +77,18 @@ def run() -> None:
 
             if results:
                 teams_alert.send_daily_summary(project.name, results)
+
+        # A-07: Gemini는 enrichment다 — 이 step에서 어떤 예외가 나든 위 Daily Collection
+        # 결과(이미 commit됨)를 무효화하지 않는다.
+        try:
+            summary = process_pending_analysis(db)
+            print(
+                f"[pending-analysis] processed={summary.processed} succeeded={summary.succeeded} "
+                f"still_pending={summary.still_pending} failed={summary.failed} "
+                f"quota_stopped={summary.quota_stopped}"
+            )
+        except Exception as e:  # noqa: BLE001 - 의도적으로 광범위하게 격리 (A-07)
+            print(f"[pending-analysis] 재시도 배치 실패(무시하고 계속): {e}")
     finally:
         db.close()
 

@@ -85,7 +85,7 @@ function CatchGraphic() {
 
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src="/mascot/catcher-hero.png"
+        src="/mascot/catcher-hero.webp"
         alt="캐쳐가 새로운 광고를 캐치하는 모습"
         className="absolute bottom-0 left-1/2 w-48 -translate-x-1/2 -rotate-[4deg] drop-shadow-2xl sm:w-56"
       />

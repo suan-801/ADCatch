@@ -276,3 +276,17 @@ def test_media_analysis_failure_does_not_lose_collected_ads(db, competitor, monk
     assert ad.visual_type is None
     # BASELINE_DISCOVERED든 STARTED든, 이벤트가 정상적으로 기록됐는지도 함께 확인
     assert len(_events(db, competitor.id)) == 1
+
+
+# Part C-03 — 광고 1건의 event history를 오래된 순으로 반환한다.
+def test_get_ad_history_returns_events_oldest_first(db, competitor):
+    synchronize_ad_status(db, competitor.id, [_raw("A")], _run(db, competitor), tag_visual=False)  # baseline(NEW)
+    synchronize_ad_status(db, competitor.id, [_raw("A")], _run(db, competitor), tag_visual=False)  # ACTIVE
+    synchronize_ad_status(db, competitor.id, [], _run(db, competitor), tag_visual=False)  # STOPPED
+    synchronize_ad_status(db, competitor.id, [_raw("A")], _run(db, competitor), tag_visual=False)  # REACTIVATED
+
+    ad = db.query(Ad).filter(Ad.ad_archive_id == "A").one()
+    history = collection_history.get_ad_history(db, ad.id)
+
+    assert [e.event_type.value for e in history] == ["BASELINE_DISCOVERED", "STOPPED", "REACTIVATED"]
+    assert history == sorted(history, key=lambda e: e.event_date)

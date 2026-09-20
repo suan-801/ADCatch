@@ -23,6 +23,8 @@ export interface Competitor {
   created_at: string;
 }
 
+export type AnalysisStatus = "PENDING" | "SUCCESS" | "FAILED";
+
 export interface Ad {
   id: string;
   competitor_id: string;
@@ -39,6 +41,21 @@ export interface Ad {
   source_started_at: string | null;
   consecutive_inactive_days: number;
   is_archived: boolean;
+  // Part C/A — Gemini 비주얼 분석 상태. PENDING/FAILED여도 광고 자체는 Gallery에 정상 표시한다(A-09).
+  analysis_status: AnalysisStatus;
+  analysis_error: string | null;
+}
+
+// Part C-03 — Ad Detail Drawer의 event history.
+export interface AdHistoryEvent {
+  event_type: AdChangeEventType;
+  event_date: string;
+  survival_days_at_event: number | null;
+}
+
+export interface AdHistoryResponse {
+  ad_id: string;
+  events: AdHistoryEvent[];
 }
 
 export interface DashboardMetrics {

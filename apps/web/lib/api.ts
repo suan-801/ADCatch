@@ -1,4 +1,13 @@
-import type { Ad, AdChangesResponse, Competitor, CollectionFreshness, DashboardMetrics, Project, SyncResult } from "./types";
+import type {
+  Ad,
+  AdChangesResponse,
+  AdHistoryResponse,
+  Competitor,
+  CollectionFreshness,
+  DashboardMetrics,
+  Project,
+  SyncResult,
+} from "./types";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -43,6 +52,7 @@ export const api = {
   listAds: (competitorId: string) => request<Ad[]>(`/competitors/${competitorId}/ads`),
   collectNow: (competitorId: string) =>
     request<SyncResult>(`/competitors/${competitorId}/ads/collect`, { method: "POST" }),
+  getAdHistory: (adId: string) => request<AdHistoryResponse>(`/ads/${adId}/history`),
 
   getAdChanges: (projectId: string, params: { date: string; competitorId?: string }) => {
     const qs = new URLSearchParams({ date: params.date });

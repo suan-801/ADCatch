@@ -9,12 +9,15 @@ from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import Ad, Competitor, User
-from app.schemas import AdOut, SyncResult
+from app.schemas import AdHistoryResponse, AdOut, SyncResult
 from app.services import collection_history
 from app.services.ad_library_collector import ApifyRunError, fetch_live_ads
 from app.services.ad_sync import synchronize_ad_status
 
 router = APIRouter(prefix="/competitors/{competitor_id}/ads", tags=["ads"])
+# Part C-03: 개별 광고 조회는 competitor_id 없이 ad_id만으로 이뤄지므로 별도 prefix를 쓴다.
+# 기존 /competitors/{competitor_id}/ads 계약은 변경하지 않는다.
+ad_detail_router = APIRouter(prefix="/ads", tags=["ads"])
 
 
 def _get_owned_competitor(db: Session, competitor_id: uuid.UUID, user: User) -> Competitor:
@@ -72,3 +75,16 @@ def collect_now(
     # P0-02: 상한에 도달했다면(=더 있을 수 있음) 이 스냅샷은 불완전한 것으로 간주한다.
     snapshot_complete = len(fetched) < settings.apify_max_ads
     return synchronize_ad_status(db, competitor_id, fetched, run, snapshot_complete=snapshot_complete)
+
+
+@ad_detail_router.get("/{ad_id}/history", response_model=AdHistoryResponse)
+def get_ad_history(
+    ad_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Part C-03 — Ad Detail Drawer의 event history. 기존 Daily Changes API는 변경하지 않는다."""
+    ad = db.get(Ad, ad_id)
+    if ad is None or ad.competitor.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Ad not found")
+    return AdHistoryResponse(ad_id=ad_id, events=collection_history.get_ad_history(db, ad_id))

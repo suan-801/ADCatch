@@ -68,7 +68,23 @@ Meta Ad Library 스크래핑은 Apify의 `curious_coder/facebook-ads-library-scr
 
 Celery/Redis 대신 `apps/api/scripts/run_daily_collection.py` 스크립트를 매일 1회 실행하는 방식을
 기본값으로 채택했습니다. `.github/workflows/daily-collect.yml`에 GitHub Actions cron 예시가 있습니다
-(GitHub repo secrets에 위 자격증명을 등록하면 바로 동작).
+(GitHub repo secrets에 위 자격증명을 등록하면 바로 동작). 이 스크립트는 마지막 단계로 Gemini
+PENDING 재분석 배치도 함께 실행합니다.
+
+## Gemini PENDING 재분석 수동 실행
+
+신규 소재의 Gemini 비전 분석이 quota/일시 오류로 `PENDING`에 머무는 경우, Daily Scheduler를
+기다리지 않고 즉시 재시도하고 싶다면:
+
+```bash
+cd apps/api
+python -m scripts.process_pending_analysis            # 기본 배치 크기(GEMINI_PENDING_BATCH_SIZE)만큼 처리
+python -m scripts.process_pending_analysis --limit 50  # 이번 실행만 50건으로 제한
+```
+
+배치 크기/재시도 임계값은 `apps/api/app/config.py`의 `gemini_pending_batch_size` /
+`gemini_analysis_max_retries`(환경변수로도 override 가능)로 조정합니다. 자세한 lifecycle은
+[`docs/DATA_SEMANTICS.md`](./docs/DATA_SEMANTICS.md) §8 참고.
 
 ## DB 스키마 변경 시 주의
 

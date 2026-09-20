@@ -1,16 +1,37 @@
 import type { Ad } from "@/lib/types";
 import { runningDays, survivalDays } from "@/lib/types";
-import { StatusBadge } from "./status-badge";
+import { StatusBadge } from "@/components/status-badge";
 
 type GalleryAd = Ad & { competitor_name?: string };
 
-export function AdGallery({ ads }: { ads: GalleryAd[] }) {
+export function AdGallery({
+  ads,
+  totalCount,
+  onCardClick,
+}: {
+  /** 필터 적용 후 렌더링할 소재 목록. */
+  ads: GalleryAd[];
+  /** 필터 적용 전(브랜드 필터까지만 반영된) 전체 개수 — B-08: "데이터 없음"과 "필터 결과 없음"을
+   * 구분하기 위해 필요하다. */
+  totalCount: number;
+  onCardClick: (ad: GalleryAd) => void;
+}) {
   const sorted = [...ads].sort((a, b) => survivalDays(b) - survivalDays(a));
+
+  if (totalCount === 0) {
+    return (
+      <div className="rounded-2xl border border-dashed border-border p-12 text-center text-sm text-muted">
+        아직 수집된 소재가 없습니다. 브랜드를 등록하고 수집을 실행해보세요.
+      </div>
+    );
+  }
 
   if (sorted.length === 0) {
     return (
       <div className="rounded-2xl border border-dashed border-border p-12 text-center text-sm text-muted">
-        아직 수집된 소재가 없습니다. 브랜드를 등록하고 수집을 실행해보세요.
+        조건에 맞는 광고가 없어요.
+        <br />
+        필터를 변경해보세요.
       </div>
     );
   }
@@ -22,7 +43,16 @@ export function AdGallery({ ads }: { ads: GalleryAd[] }) {
         return (
           <div
             key={ad.id}
-            className="group overflow-hidden rounded-2xl border border-border bg-white transition-shadow hover:shadow-md"
+            role="button"
+            tabIndex={0}
+            onClick={() => onCardClick(ad)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onCardClick(ad);
+              }
+            }}
+            className="group cursor-pointer overflow-hidden rounded-2xl border border-border bg-white text-left transition-shadow hover:shadow-md"
           >
             <div className="relative flex aspect-[4/5] items-center justify-center bg-slate-50">
               {ad.image_url ? (
@@ -50,6 +80,11 @@ export function AdGallery({ ads }: { ads: GalleryAd[] }) {
                 <p className="text-lg font-extrabold leading-none tabular-nums">{running.days}일째</p>
                 <p className="text-[9px] font-semibold uppercase tracking-wide text-white/70">{running.label} 중</p>
               </div>
+              {ad.analysis_status === "PENDING" && (
+                <span className="absolute left-2 top-2 rounded-full bg-white/90 px-2 py-1 text-[9px] font-semibold text-muted">
+                  비주얼 분석 대기
+                </span>
+              )}
             </div>
             <div className="space-y-2 p-4">
               <div className="flex items-center justify-between gap-2">

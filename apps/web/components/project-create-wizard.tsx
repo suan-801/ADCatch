@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { SyncResult } from "@/lib/types";
+import { isValidMetaAdLibraryUrl, META_AD_LIBRARY_URL_ERROR } from "@/lib/validation";
 
 // Part E — New Project Onboarding: "Project 생성 → 빈 Dashboard → 하단에서 Brand 추가" 대신
 // Project(Step1) → Brand(Step2) → Initial Collection(Step3~4)의 짧은 온보딩으로 만든다.
@@ -67,7 +68,7 @@ export function ProjectCreateWizard({
   const [projectId, setProjectId] = useState<string | null>(null);
   const [alreadyAutoCollect, setAlreadyAutoCollect] = useState(false);
   const [outcomes, setOutcomes] = useState<Record<string, BrandOutcome>>({});
-  const [optInState, setOptInState] = useState<"idle" | "submitting">("idle");
+  const [optInState, setOptInState] = useState<"idle" | "submitting" | "failed">("idle");
 
   const reset = () => {
     setStep("project");
@@ -92,7 +93,10 @@ export function ProjectCreateWizard({
   const removeBrandRow = (key: string) =>
     setBrands((prev) => (prev.length <= 1 ? prev : prev.filter((b) => b.key !== key)));
 
-  const validBrands = brands.filter((b) => b.name.trim() && b.url.trim());
+  const filledBrands = brands.filter((b) => b.name.trim() && b.url.trim());
+  // E-01: URL이 채워져 있지만 Meta Ad Library 형식이 아닌 row가 하나라도 있으면 진행을 막는다.
+  const hasInvalidUrl = filledBrands.some((b) => !isValidMetaAdLibraryUrl(b.url.trim()));
+  const validBrands = hasInvalidUrl ? [] : filledBrands;
 
   const runCollectionFor = async (competitorId: string, rowKey: string) => {
     setOutcomes((prev) => ({ ...prev, [rowKey]: { status: "collecting", competitorId } }));
@@ -161,13 +165,16 @@ export function ProjectCreateWizard({
     }
   };
 
+  // D-01: updateProject 실패 시 finally에서 무조건 navigate하던 버그를 수정 — 성공했을 때만
+  // Dashboard로 이동한다. 실패하면 이 completion step에 그대로 남아 에러 메시지와 재시도 버튼을 보여준다.
   const handleOptIn = async () => {
     if (!projectId) return;
     setOptInState("submitting");
     try {
       await api.updateProject(projectId, { auto_collect_enabled: true });
-    } finally {
       finishAndNavigate();
+    } catch {
+      setOptInState("failed");
     }
   };
 
@@ -265,8 +272,19 @@ export function ProjectCreateWizard({
                     value={row.url}
                     onChange={(e) => updateBrand(row.key, { url: e.target.value })}
                     placeholder="Meta Ad Library URL을 입력해주세요"
-                    className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-xs focus:border-brand focus:outline-none"
+                    className={`mt-2 w-full rounded-lg border px-3 py-2 text-xs focus:outline-none ${
+                      row.url.trim() && !isValidMetaAdLibraryUrl(row.url.trim())
+                        ? "border-status-inactive focus:border-status-inactive"
+                        : "border-border focus:border-brand"
+                    }`}
                   />
+                  {row.url.trim() && !isValidMetaAdLibraryUrl(row.url.trim()) ? (
+                    <p className="mt-1 text-[11px] font-medium text-status-inactive">{META_AD_LIBRARY_URL_ERROR}</p>
+                  ) : (
+                    <p className="mt-1 text-[11px] text-muted">
+                      Meta Ad Library에서 브랜드 페이지를 연 뒤 브라우저 주소를 붙여넣어주세요.
+                    </p>
+                  )}
                 </div>
               ))}
             </div>
@@ -308,7 +326,7 @@ export function ProjectCreateWizard({
         {step === "done" && (
           <div className="text-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/mascot/catcher-hero.png" alt="캐쳐" className="mx-auto w-20" />
+            <img src="/mascot/catcher-hero.webp" alt="캐쳐" className="mx-auto w-20" />
             {successBrandCount > 0 ? (
               <p className="mt-4 text-lg font-bold text-foreground">
                 {successBrandCount}개 브랜드에서
@@ -325,6 +343,13 @@ export function ProjectCreateWizard({
               <>
                 <p className="mt-5 text-base font-bold text-foreground">앞으로 매일 변화를 CATCH하시겠어요?</p>
                 <p className="mt-1 text-xs text-muted">매일 자동으로 새로운 광고와 종료된 광고를 확인해드려요.</p>
+                {optInState === "failed" && (
+                  <p className="mt-3 text-xs font-medium text-status-inactive">
+                    자동 추적을 설정하지 못했어요.
+                    <br />
+                    잠시 후 다시 시도해주세요.
+                  </p>
+                )}
                 <div className="mt-5 flex flex-col items-center gap-2 sm:flex-row sm:justify-center">
                   <button
                     type="button"
@@ -332,7 +357,11 @@ export function ProjectCreateWizard({
                     disabled={optInState === "submitting"}
                     className="w-full rounded-full bg-brand px-6 py-3 text-sm font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-60 sm:w-auto"
                   >
-                    {optInState === "submitting" ? "설정 중..." : "매일 변화 CATCH하기"}
+                    {optInState === "submitting"
+                      ? "설정 중..."
+                      : optInState === "failed"
+                        ? "다시 설정하기"
+                        : "매일 변화 CATCH하기"}
                   </button>
                   <button
                     type="button"

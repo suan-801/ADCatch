@@ -46,14 +46,21 @@ Brand(Step2, 최소 1개) → Initial Collection(Step3~4)을 하나의 짧은 �
 - 프론트: Project Header의 "⋯" 메뉴 → 확인 다이얼로그(destructive, 되돌릴 수 없음 문구) →
   삭제 후 남은 프로젝트가 있으면 그중 하나로, 없으면 Landing(`/`)으로 이동한다.
 
-## 3. Landing — Monitoring Section 비주얼
+## 3. Landing — "What it does" 아트워크 갤러리
 
-`components/landing/what-it-does-section.tsx`: 단순 8색 rectangle 대신, 4개의 "저화질 광고
-화면" 카드가 각기 다른 delay로 crossfade하고(`tailwind.config.ts`의 `screen-fade` keyframe,
-"프리즘" 저화질 표현은 scanline 오버레이로만 구현 — 캐쳐 자체는 Hero와 동일한 clean 3D 유지),
-`catcher-monitoring.png`(신규 asset, 3/4 후면 뷰)가 섹션의 약 35~40% 비중으로 화면들을 관찰하는
-구도로 배치된다. 애니메이션은 전부 `motion-safe:` prefix로 `prefers-reduced-motion`을 지원한다.
-카피는 변경하지 않았다.
+`components/landing/what-it-does-section.tsx`: "경쟁사 소재는 매일 다른 비주얼로 바뀌고,
+ADCatcher는 그 변화를 지켜본다"는 개념을, 고전 명화를 캐쳐로 재해석한 3장의 "전시 작품"
+(MONA/PEARL/VAN GOGH, `public/landing/gallery/*.webp`)으로 표현한다. 실제 광고 이미지는 쓰지
+않는다 — 세 작품 자체가 "오늘은 이 소재, 내일은 다른 소재"라는 비유다. `IntersectionObserver`로
+섹션이 뷰포트에 들어오는 순간 세 작품이 가운데에서 확대되며 튀어나오는 1회성 reveal
+애니메이션을 재생하고, `prefers-reduced-motion`이면 애니메이션 없이 바로 최종 상태로 보여준다
+(`useRevealOnScroll` 훅).
+
+> 2026-09 asset 정리 메모: 이전 초안 문서는 이 섹션에 "저화질 광고 화면 crossfade + 신규
+> `catcher-monitoring.png`" 구성을 계획했다고 적어뒀지만, 실제로 구현된 것은 위 3-아트워크
+> reveal 갤러리뿐이다(`screen-fade` keyframe도, 코드 내 `catcher-monitoring` 참조도 존재하지
+> 않음). `catcher-monitoring.png`는 코드 어디서도 참조되지 않는 미사용 asset으로 `public/mascot/`에
+> 남아있다 — 실제로 이 구성을 쓸 계획이면 여기 연결하고, 아니면 삭제 대상으로 검토한다.
 
 ## 4. Product Catcher(MascotWidget) 권장 크기
 

@@ -24,6 +24,7 @@ from app.schemas import (
     AdChangeEventType,
     AdChangesResponse,
     AdChangeSummary,
+    AdHistoryEvent,
     ChangedAdOut,
     CollectionFreshness,
     CollectionStatus,
@@ -237,6 +238,15 @@ def get_ad_changes(
         stopped_ads=stopped,
         visual_pattern=dict(visual_counter),
     )
+
+
+def get_ad_history(db: Session, ad_id: uuid.UUID) -> list[AdHistoryEvent]:
+    """Part C-03 — 광고 1건의 STARTED/STOPPED/REACTIVATED/BASELINE_DISCOVERED 이력을
+    오래된 순으로 반환한다. 기존 Daily Changes API(get_ad_changes)는 건드리지 않는다."""
+    events = db.scalars(
+        select(AdStatusEvent).where(AdStatusEvent.ad_id == ad_id).order_by(AdStatusEvent.event_date.asc())
+    ).all()
+    return [AdHistoryEvent.model_validate(e) for e in events]
 
 
 def get_freshness_summary(db: Session, project_id: uuid.UUID) -> CollectionFreshness:

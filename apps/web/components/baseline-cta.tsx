@@ -63,7 +63,7 @@ export function BaselineCTA({
       {state === "success" ? (
         <div className="flex items-center gap-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/mascot/catcher-hero.png" alt="캐쳐" className="w-16 shrink-0 sm:w-20" />
+          <img src="/mascot/catcher-hero.webp" alt="캐쳐" className="w-16 shrink-0 sm:w-20" />
           <div>
             <p className="text-base font-extrabold text-status-active">✓ 매일 변화를 CATCH할게요</p>
             <p className="mt-1 text-sm text-muted">새로운 광고가 등장하거나 사라지면 ADCatcher가 기록해둘게요.</p>
@@ -110,7 +110,7 @@ export function BaselineCTA({
 
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/mascot/catcher-hero.png"
+            src="/mascot/catcher-hero.webp"
             alt="캐쳐"
             className="w-20 shrink-0 self-center sm:w-28"
           />

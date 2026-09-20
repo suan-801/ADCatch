@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { Competitor } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
+import { isValidMetaAdLibraryUrl, META_AD_LIBRARY_URL_ERROR } from "@/lib/validation";
 
 // 브리핑 §27: 상시 노출 등록 폼을 "+ 브랜드 추가" → Modal로 축소. validation/API/등록 로직은
 // 기존 그대로 재사용하고, 노출 위치만 Modal 안으로 옮긴다.
@@ -27,9 +28,15 @@ export function CompetitorPanel({
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [urlError, setUrlError] = useState(false);
 
   const handleSubmit = async () => {
     if (!name.trim() || !url.trim()) return;
+    if (!isValidMetaAdLibraryUrl(url.trim())) {
+      setUrlError(true);
+      return;
+    }
+    setUrlError(false);
     setSubmitting(true);
     try {
       await onCreate({ name: name.trim(), ad_library_url: url.trim() });
@@ -88,10 +95,22 @@ export function CompetitorPanel({
           />
           <input
             value={url}
-            onChange={(e) => setUrl(e.target.value)}
+            onChange={(e) => {
+              setUrl(e.target.value);
+              if (urlError) setUrlError(false);
+            }}
             placeholder="https://www.facebook.com/ads/library/?...&view_all_page_id=..."
-            className="w-full rounded-lg border border-border px-3 py-2 text-xs focus:border-brand focus:outline-none"
+            className={`w-full rounded-lg border px-3 py-2 text-xs focus:outline-none ${
+              urlError ? "border-status-inactive focus:border-status-inactive" : "border-border focus:border-brand"
+            }`}
           />
+          {urlError ? (
+            <p className="text-[11px] font-medium text-status-inactive">{META_AD_LIBRARY_URL_ERROR}</p>
+          ) : (
+            <p className="text-[11px] text-muted">
+              Meta Ad Library에서 브랜드 페이지를 연 뒤 브라우저 주소를 붙여넣어주세요.
+            </p>
+          )}
           <button
             onClick={handleSubmit}
             disabled={submitting || !name.trim() || !url.trim()}
