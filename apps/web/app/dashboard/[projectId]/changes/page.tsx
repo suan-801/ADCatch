@@ -73,7 +73,7 @@ export default function DailyChangesPage() {
   return (
     <div className="space-y-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <DateNav date={date} onChange={setDate} />
+        <DateNav date={date} onChange={setDate} minDate={result?.history_available_from} />
         <CompetitorFilter competitors={competitors} selectedId={competitorId} onSelect={setCompetitorId} />
       </div>
 

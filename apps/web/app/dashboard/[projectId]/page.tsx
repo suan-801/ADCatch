@@ -87,6 +87,10 @@ export default function CurrentDashboardPage() {
   const handleCreateCompetitor = async (payload: { name: string; ad_library_url: string }) => {
     const competitor = await api.createCompetitor(projectId, payload);
     setCompetitors((prev) => [...prev, competitor]);
+    setCollectTargetId(competitor.id);
+    // Part F-03/F-04: 기존 프로젝트에 브랜드를 새로 추가하면 첫 Collection을 바로 시작한다 —
+    // 기존 handleCollect(baseline 판정 포함)를 그대로 재사용한다(별도 로직 신설 금지).
+    await handleCollect(competitor.id);
   };
 
   const handleCollect = async (competitorId: string) => {
@@ -167,6 +171,17 @@ export default function CurrentDashboardPage() {
         />
       )}
 
+      {/* Part F-01: 브랜드 등록은 광고 분석보다 앞단의 primary setup action이므로
+          더 이상 페이지 최하단에 두지 않고 Live Ads 바로 위로 올린다. */}
+      <CompetitorPanel
+        competitors={competitors}
+        selectedId={collectTargetId}
+        onSelect={setCollectTargetId}
+        onCreate={handleCreateCompetitor}
+        onCollect={handleCollect}
+        collecting={collecting}
+      />
+
       <section>
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <h2 className="text-lg font-bold text-foreground">
@@ -182,15 +197,6 @@ export default function CurrentDashboardPage() {
           <VisualFormatChart ratio={metrics.visual_type_ratio} />
         </section>
       )}
-
-      <CompetitorPanel
-        competitors={competitors}
-        selectedId={collectTargetId}
-        onSelect={setCollectTargetId}
-        onCreate={handleCreateCompetitor}
-        onCollect={handleCollect}
-        collecting={collecting}
-      />
 
       <MascotWidget
         message={mascotMessage}

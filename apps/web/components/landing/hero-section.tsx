@@ -13,16 +13,17 @@ export function HeroSection() {
         className="relative z-10 w-56 animate-float drop-shadow-2xl sm:w-72 md:w-80"
       />
 
-      <h1 className="relative z-10 mt-4 text-4xl font-extrabold leading-[1.15] text-white sm:text-6xl md:text-7xl">
-        매일 바뀌는
-        <br />
-        경쟁사 광고를
-        <br />
-        <span className="inline-block rounded-2xl bg-white px-4 py-1 text-brand-dark">CATCH!</span>
+      <h1 className="relative z-10 mt-6 flex flex-col gap-0.5 text-4xl font-extrabold leading-[1.06] text-white [word-break:keep-all] sm:mt-8 sm:gap-1 sm:text-6xl md:text-7xl">
+        <span>매일 바뀌는</span>
+        <span>경쟁사 광고를</span>
+        <span className="mt-1.5 sm:mt-2">
+          <span className="inline-block rounded-2xl bg-white px-4 py-1 text-brand-dark">CATCH!</span>
+        </span>
       </h1>
 
-      <p className="relative z-10 mt-6 max-w-md text-sm text-white/90 sm:text-base">
-        Meta Ad Library 라이브 소재를 매일 자동 수집해, 신규/종료 감지와 생존 기간을 한눈에 보여드려요.
+      <p className="relative z-10 mt-8 max-w-md text-sm leading-relaxed text-white/90 sm:mt-10 sm:text-base">
+        <span className="block">Meta Ad Library 라이브 소재를 매일 자동 수집해,</span>
+        <span className="block">신규/종료 감지와 생존 기간을 한눈에 보여드려요.</span>
       </p>
 
       <a

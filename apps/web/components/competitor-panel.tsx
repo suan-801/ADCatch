@@ -18,7 +18,7 @@ export function CompetitorPanel({
 }: {
   competitors: Competitor[];
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string | null) => void;
   onCreate: (payload: { name: string; ad_library_url: string }) => Promise<void>;
   onCollect: (id: string) => Promise<void>;
   collecting: boolean;
@@ -48,7 +48,7 @@ export function CompetitorPanel({
       {competitors.map((c) => (
         <button
           key={c.id}
-          onClick={() => onSelect(c.id)}
+          onClick={() => onSelect(c.id === selectedId ? null : c.id)}
           className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors ${
             c.id === selectedId
               ? "border-brand bg-brand text-white"

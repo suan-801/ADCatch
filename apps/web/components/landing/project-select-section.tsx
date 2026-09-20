@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { Project } from "@/lib/types";
+import { ProjectCreateWizard } from "@/components/project-create-wizard";
 
 interface ProjectCardData {
   project: Project;
@@ -17,12 +17,9 @@ interface ProjectCardData {
 export function ProjectSelectSection() {
   const [cards, setCards] = useState<ProjectCardData[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [newName, setNewName] = useState("");
-  const [creating, setCreating] = useState(false);
-  const router = useRouter();
+  const [wizardOpen, setWizardOpen] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadCards = () => {
     api
       .listProjects()
       .then(async (projects) => {
@@ -39,24 +36,14 @@ export function ProjectSelectSection() {
             };
           }),
         );
-        if (!cancelled) setCards(enriched);
+        setCards(enriched);
       })
-      .catch((e) => !cancelled && setError(String(e)));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const handleCreate = async () => {
-    if (!newName.trim()) return;
-    setCreating(true);
-    try {
-      const project = await api.createProject(newName.trim());
-      router.push(`/dashboard/${project.id}`);
-    } finally {
-      setCreating(false);
-    }
+      .catch((e) => setError(String(e)));
   };
+
+  useEffect(() => {
+    loadCards();
+  }, []);
 
   return (
     <section id="project-select" className="bg-white px-6 py-24 sm:py-32">
@@ -85,7 +72,7 @@ export function ProjectSelectSection() {
             >
               <p className="text-lg font-extrabold text-foreground group-hover:text-brand-dark">{project.name}</p>
               <div className="mt-3 flex gap-4 text-xs text-muted">
-                <span>경쟁사 {competitorCount}</span>
+                <span>브랜드 {competitorCount}</span>
                 <span>활성 광고 {activeAdCount}</span>
               </div>
             </Link>
@@ -100,23 +87,17 @@ export function ProjectSelectSection() {
           {!cards && !error && <p className="col-span-full text-center text-sm text-muted">불러오는 중...</p>}
         </div>
 
-        <div className="mx-auto mt-10 flex max-w-sm gap-2">
-          <input
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            placeholder="새 프로젝트명 (예: NIKE)"
-            className="min-w-0 flex-1 rounded-full border border-border px-4 py-2.5 text-sm focus:border-brand focus:outline-none"
-            onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-          />
+        <div className="mx-auto mt-10 flex max-w-sm justify-center">
           <button
-            onClick={handleCreate}
-            disabled={creating}
-            className="rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            onClick={() => setWizardOpen(true)}
+            className="rounded-full bg-brand px-6 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
           >
             새 프로젝트
           </button>
         </div>
       </div>
+
+      <ProjectCreateWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onCreated={loadCards} />
     </section>
   );
 }

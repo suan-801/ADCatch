@@ -35,7 +35,7 @@ export function MascotWidget({
   return (
     <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-2">
       {open && (
-        <div className="max-w-[220px] rounded-xl border border-border bg-white p-3 text-xs text-foreground shadow-lg">
+        <div className="max-w-[240px] rounded-xl border border-border bg-white p-3 text-xs text-foreground shadow-lg">
           {message}
         </div>
       )}
@@ -43,13 +43,17 @@ export function MascotWidget({
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label="캐쳐 비서 토글"
-        className="h-16 w-16 rounded-full border border-border bg-white p-1.5 shadow-lg transition-transform hover:scale-105"
+        // I-02/I-03: 64x64 → 데스크톱 80~88px/모바일 64~72px로 키우고, 은은한 오렌지 링 +
+        // 진한 그림자로 주목도를 올린다. openSignal이 바뀔 때만(=의미 있는 순간) key가 바뀌어
+        // pop-in이 다시 재생된다 — 항상 움직이는 캐릭터로 만들지 않는다(I-03).
+        className="h-[70px] w-[70px] shrink-0 rounded-full border border-border bg-white p-2 shadow-xl ring-4 ring-brand/15 transition-transform hover:scale-105 sm:h-[84px] sm:w-[84px]"
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
+          key={String(openSignal ?? "")}
           src={happy ? "/mascot/Catcher_happy.png" : "/mascot/Catcher.png"}
           alt="캐쳐"
-          className="pixelated h-full w-full object-contain"
+          className="pixelated h-full w-full object-contain motion-safe:animate-pop-in"
         />
       </button>
     </div>

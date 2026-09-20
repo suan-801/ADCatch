@@ -38,6 +38,8 @@ STARTED/STOPPED/REACTIVATED 이벤트를 1건씩 기록한다 (collection_run은
     (SQLAlchemy Session 자체는 스레드 세이프하지 않으므로 DB 쓰기는 항상 메인 스레드에서 순차로 한다).
 """
 
+import logging
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -49,6 +51,7 @@ from app.config import settings
 from app.models import Ad, Competitor, CollectionRun
 from app.schemas import AdChangeEventType, AdStatus, RawAdItem, SyncResult, VisualType
 from app.services import collection_history, media
+from app.services.timing import stage_timer
 
 
 def _survival_days_at(source_started_at: datetime | None, first_seen_at: datetime, at: datetime) -> int:
@@ -133,12 +136,15 @@ def synchronize_ad_status(
     enrichment_results: dict[str, _Enrichment] = {}
     if tag_visual:
         new_items = [item for aid, item in fetched_by_archive_id.items() if aid not in existing_by_archive_id]
-        enrichment_results = _enrich_new_ads_concurrently(competitor_id, new_items)
+        with stage_timer("enrichment_concurrent_total", competitor_id=competitor_id, new_count=len(new_items)):
+            enrichment_results = _enrich_new_ads_concurrently(competitor_id, new_items)
 
     new_count = 0
     kept_active_count = 0
     newly_inactive_count = 0
     newly_archived_count = 0
+
+    db_sync_start = time.perf_counter()
 
     # 1) 이번에 발견된 소재 → NEW 생성 또는 기존 소재(아카이빙 포함) ACTIVE 갱신
     for ad_archive_id, item in fetched_by_archive_id.items():
@@ -266,6 +272,13 @@ def synchronize_ad_status(
                 existing.is_archived = True
                 newly_archived_count += 1
 
+    logging.getLogger("adcatcher.collection_timing").info(
+        "stage=db_core_sync ms=%.0f competitor_id=%s new_count=%d",
+        (time.perf_counter() - db_sync_start) * 1000,
+        competitor_id,
+        new_count,
+    )
+
     if establishes_baseline:
         competitor.baseline_completed_at = now
 
@@ -274,7 +287,8 @@ def synchronize_ad_status(
     else:
         collection_history.complete_collection_run_partial(db, collection_run, fetched_ads_count=len(fetched_ads))
 
-    db.commit()
+    with stage_timer("db_final_commit", competitor_id=competitor_id):
+        db.commit()
 
     return SyncResult(
         competitor_id=competitor_id,

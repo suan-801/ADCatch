@@ -13,6 +13,7 @@ import httpx
 
 from app.config import settings
 from app.schemas import AdFormat, RawAdItem
+from app.services.timing import stage_timer
 
 APIFY_API_BASE = "https://api.apify.com/v2"
 
@@ -115,13 +116,21 @@ def parse_items(items: list[dict], page_id: str) -> list[RawAdItem]:
 
 
 def fetch_live_ads(ad_library_url: str, page_id: str, max_ads: int = 30) -> list[RawAdItem]:
-    """경쟁사 Meta Ad Library URL 기준으로 현재 라이브 소재 전체를 수집한다."""
-    run = run_actor(ad_library_url, max_ads=max_ads)
-    finished = wait_run(run["id"])
+    """경쟁사 Meta Ad Library URL 기준으로 현재 라이브 소재 전체를 수집한다.
+
+    G-01: stage별(actor start / running·wait / dataset download / parse) 시간을 structured
+    log로 남긴다 — 로직/반환값은 이전과 동일하다."""
+    with stage_timer("apify_actor_start", page_id=page_id):
+        run = run_actor(ad_library_url, max_ads=max_ads)
+    with stage_timer("apify_actor_wait", page_id=page_id, run_id=run["id"]):
+        finished = wait_run(run["id"])
     if finished["status"] != "SUCCEEDED":
         raise ApifyRunError(f"Apify run ended with status={finished['status']}")
-    items = get_dataset_items(finished["defaultDatasetId"])
-    return parse_items(items, page_id)
+    with stage_timer("dataset_download", page_id=page_id):
+        items = get_dataset_items(finished["defaultDatasetId"])
+    with stage_timer("raw_ad_parse", page_id=page_id, item_count=len(items)):
+        parsed = parse_items(items, page_id)
+    return parsed
 
 
 def extract_page_id(ad_library_url: str) -> str | None:

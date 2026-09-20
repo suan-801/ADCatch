@@ -35,10 +35,20 @@ export function AdGallery({ ads }: { ads: GalleryAd[] }) {
               ) : (
                 <span className="text-xs text-muted">{ad.format ?? "미디어 없음"}</span>
               )}
-              {/* 브리핑 §25: 생존일수는 작은 메타데이터가 아니라 강한 시각적 배지로 표현 */}
-              <div className="absolute right-2 top-2 rounded-xl bg-foreground/80 px-2.5 py-1.5 text-right text-white backdrop-blur-sm">
-                <p className="text-lg font-extrabold leading-none tabular-nums">{running.days}</p>
-                <p className="text-[9px] font-semibold uppercase tracking-wide text-white/70">{running.label}</p>
+              {/* 브리핑 §25: 생존일수는 작은 메타데이터가 아니라 강한 시각적 배지로 표현.
+                  P0-06 의미는 그대로 유지하되("집행"=실제 Meta 집행 시작일 기준,
+                  "추적"=ADCatcher가 처음 발견한 시점 기준) "2집행"처럼 붙어 읽히던 표기를
+                  "집행 2일째" 형태 + 툴팁으로 풀어써 한눈에 뜻이 들어오게 한다. */}
+              <div
+                className="absolute right-2 top-2 rounded-xl bg-foreground/80 px-2.5 py-1.5 text-right text-white backdrop-blur-sm"
+                title={
+                  running.label === "집행"
+                    ? `이 광고가 Meta에서 실제로 집행된 지 ${running.days}일째예요.`
+                    : `ADCatcher가 이 광고를 처음 발견한 지 ${running.days}일째예요. (실제 집행 시작일은 확인되지 않았어요)`
+                }
+              >
+                <p className="text-lg font-extrabold leading-none tabular-nums">{running.days}일째</p>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-white/70">{running.label} 중</p>
               </div>
             </div>
             <div className="space-y-2 p-4">

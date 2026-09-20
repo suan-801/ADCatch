@@ -19,6 +19,10 @@ export const api = {
     request<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) }),
   updateProject: (projectId: string, payload: { auto_collect_enabled?: boolean }) =>
     request<Project>(`/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteProject: async (projectId: string): Promise<void> => {
+    const res = await fetch(`${API_BASE}/projects/${projectId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`API /projects/${projectId} delete failed: ${res.status} ${await res.text()}`);
+  },
 
   getProject: (projectId: string) => request<Project>(`/projects/${projectId}`),
 

@@ -14,7 +14,7 @@ const STEPS = [
   },
   {
     tag: "ANALYZE",
-    title: "어떤 비주얼이 반복되는지 확인",
+    title: "어떤 비주얼이 주류인지 확인",
     copy: "인물·제품·텍스트·그래픽 — 오래 살아남는 소재의 비주얼 패턴을 분석합니다.",
     Graphic: AnalyzeGraphic,
   },
@@ -34,7 +34,9 @@ export function CatchTrackAnalyzeSection() {
           >
             <div className="text-center sm:flex-1 sm:text-left">
               <p className="text-xs font-extrabold tracking-[0.2em] text-brand-dark">{tag}</p>
-              <h3 className="mt-3 text-3xl font-extrabold leading-tight text-foreground sm:text-5xl">{title}</h3>
+              <h3 className="mt-3 text-3xl font-extrabold leading-tight text-foreground [word-break:keep-all] sm:text-5xl">
+                {title}
+              </h3>
               <p className="mt-4 max-w-sm text-sm text-muted sm:text-base sm:mx-0 mx-auto">{copy}</p>
             </div>
             <div className="w-full sm:flex-1">
