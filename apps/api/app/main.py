@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import ad_changes, ads, competitors, dashboard, projects
+from app.routers import ad_changes, ads, auth, competitors, dashboard, projects
 from app.routers.ads import ad_detail_router
 
 app = FastAPI(title="ADCatcher API", version="0.1.0")
@@ -37,6 +37,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
         response.headers["Vary"] = "Origin"
     return response
 
+app.include_router(auth.router)
 app.include_router(projects.router)
 app.include_router(competitors.router)
 app.include_router(ads.router)

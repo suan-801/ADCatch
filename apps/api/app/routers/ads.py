@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_admin
 from app.models import Ad, Competitor, User
 from app.schemas import AdHistoryResponse, AdOut, SyncResult
 from app.services import collection_history
@@ -48,6 +48,7 @@ def collect_now(
     competitor_id: uuid.UUID,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    _admin: bool = Depends(require_admin),
 ):
     """해당 경쟁사에 대해 즉시 1회 수집 + 상태 동기화를 실행한다 (스케줄러 없이 수동 트리거용).
 

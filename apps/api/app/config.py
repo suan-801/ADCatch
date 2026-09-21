@@ -40,6 +40,22 @@ class Settings(BaseSettings):
     # CORS_ALLOWED_ORIGINS=https://app.adcatcher.com,https://staging.adcatcher.com 형태로 지정.
     cors_allowed_origins: str = "http://localhost:3000"
 
+    # ── Viewer/Admin 권한 ──────────────────────────────────────────────
+    # 사용자 계정 시스템이 아니라 "공용 Viewer + 공용 Admin" MVP 구조 (PRD 확장).
+    # 원본 비밀번호는 저장하지 않는다 — bcrypt hash만 보관 (scripts/hash_admin_password.py로 생성).
+    admin_password_hash: str = ""
+    # 세션 쿠키 서명용 비밀키. 비어 있으면 어떤 세션 토큰도 유효하지 않은 것으로 취급한다
+    # (=Admin 기능이 비활성화된 안전한 기본값).
+    admin_session_secret: str = ""
+    admin_session_ttl_hours: int = 8
+    # 로컬 개발(frontend/backend가 같은 site인 localhost)은 "lax"로 충분하다. Vercel 등으로
+    # frontend/backend 도메인이 분리되는 운영 배포에서는 "none"+Secure=true가 필요하다.
+    admin_cookie_samesite: str = "lax"
+    admin_cookie_secure: bool = False
+    # 로그인 brute-force 대응: 이 기간(초) 동안 이 횟수만큼 실패하면 추가 시도를 차단한다.
+    admin_login_max_attempts: int = 5
+    admin_login_lockout_seconds: int = 300
+
     @property
     def cors_allowed_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_allowed_origins.split(",") if origin.strip()]

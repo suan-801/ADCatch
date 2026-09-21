@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Competitor } from "@/lib/types";
 import { Modal } from "@/components/ui/modal";
 import { isValidMetaAdLibraryUrl, META_AD_LIBRARY_URL_ERROR } from "@/lib/validation";
+import { useAuth } from "@/lib/auth-context";
 
 // 브리핑 §27: 상시 노출 등록 폼을 "+ 브랜드 추가" → Modal로 축소. validation/API/등록 로직은
 // 기존 그대로 재사용하고, 노출 위치만 Modal 안으로 옮긴다.
@@ -24,6 +25,7 @@ export function CompetitorPanel({
   onCollect: (id: string) => Promise<void>;
   collecting: boolean;
 }) {
+  const { isAdmin } = useAuth();
   const [modalOpen, setModalOpen] = useState(false);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -66,14 +68,16 @@ export function CompetitorPanel({
         </button>
       ))}
 
-      <button
-        onClick={() => setModalOpen(true)}
-        className="rounded-full border border-dashed border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:border-brand hover:text-brand-dark"
-      >
-        + 브랜드 추가
-      </button>
+      {isAdmin && (
+        <button
+          onClick={() => setModalOpen(true)}
+          className="rounded-full border border-dashed border-border px-3.5 py-1.5 text-xs font-semibold text-muted hover:border-brand hover:text-brand-dark"
+        >
+          + 브랜드 추가
+        </button>
+      )}
 
-      {selectedId && (
+      {isAdmin && selectedId && (
         <button
           onClick={() => onCollect(selectedId)}
           disabled={collecting}

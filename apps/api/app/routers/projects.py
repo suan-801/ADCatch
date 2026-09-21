@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_admin
 from app.models import AdObservation, AdStatusEvent, CollectionRun, Project, User
 from app.schemas import ProjectCreate, ProjectOut, ProjectUpdate
 from app.services import storage
@@ -20,6 +20,7 @@ def create_project(
     payload: ProjectCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    _admin: bool = Depends(require_admin),
 ):
     project = Project(user_id=user.id, name=payload.name)
     db.add(project)
@@ -54,6 +55,7 @@ def update_project(
     payload: ProjectUpdate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    _admin: bool = Depends(require_admin),
 ):
     """Baseline Opt-in CTA / Project Header 설정에서 auto_collect_enabled를 토글한다."""
     project = db.get(Project, project_id)
@@ -73,6 +75,7 @@ def delete_project(
     project_id: uuid.UUID,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    _admin: bool = Depends(require_admin),
 ):
     """Part H: Project + 소속 Brand/Ad/수집 이력을 함께 삭제한다. 다른 Project의 데이터는
     절대 건드리지 않는다 — 전부 이 project_id 소속 competitor_id로 한정해서 지운다.

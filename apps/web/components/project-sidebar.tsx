@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import type { Project } from "@/lib/types";
 import { ProjectCreateWizard } from "@/components/project-create-wizard";
+import { useAuth } from "@/lib/auth-context";
 
 // PRD 3.1 사이드바 프로젝트 전환. mobileOpen/onMobileClose는 §41 반응형(Sidebar → Drawer) 대응.
 // Part E-02: "+ NEW PROJECT"는 Landing과 동일한 ProjectCreateWizard(Project→Brand→첫 수집)를 연다 —
@@ -27,6 +28,7 @@ export function ProjectSidebar({
   mobileOpen?: boolean;
   onMobileClose?: () => void;
 }) {
+  const { isAdmin } = useAuth();
   const [wizardOpen, setWizardOpen] = useState(false);
   const [menuOpenFor, setMenuOpenFor] = useState<string | null>(null);
 
@@ -61,16 +63,18 @@ export function ProjectSidebar({
               {p.status === "PAUSED" && <span className="ml-auto shrink-0 text-[10px] text-status-inactive">일시정지</span>}
             </button>
 
-            <button
-              type="button"
-              onClick={() => setMenuOpenFor((v) => (v === p.id ? null : p.id))}
-              aria-label={`${p.name} 옵션`}
-              className="shrink-0 rounded-full px-1.5 py-1 text-muted opacity-0 hover:bg-slate-100 hover:text-foreground group-hover:opacity-100"
-            >
-              ⋯
-            </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setMenuOpenFor((v) => (v === p.id ? null : p.id))}
+                aria-label={`${p.name} 옵션`}
+                className="shrink-0 rounded-full px-1.5 py-1 text-muted opacity-0 hover:bg-slate-100 hover:text-foreground group-hover:opacity-100"
+              >
+                ⋯
+              </button>
+            )}
 
-            {menuOpenFor === p.id && (
+            {isAdmin && menuOpenFor === p.id && (
               <>
                 <div className="fixed inset-0 z-10" onClick={() => setMenuOpenFor(null)} />
                 <div className="absolute right-0 top-full z-20 mt-1 w-36 rounded-xl border border-border bg-white p-1 shadow-lg">
@@ -92,12 +96,14 @@ export function ProjectSidebar({
         {projects.length === 0 && <p className="px-3 text-xs text-muted">아직 프로젝트가 없습니다.</p>}
       </nav>
 
-      <button
-        onClick={() => setWizardOpen(true)}
-        className="mt-4 rounded-lg border border-dashed border-border px-3 py-2 text-left text-xs font-semibold text-muted hover:border-brand hover:text-brand-dark"
-      >
-        + NEW PROJECT
-      </button>
+      {isAdmin && (
+        <button
+          onClick={() => setWizardOpen(true)}
+          className="mt-4 rounded-lg border border-dashed border-border px-3 py-2 text-left text-xs font-semibold text-muted hover:border-brand hover:text-brand-dark"
+        >
+          + NEW PROJECT
+        </button>
+      )}
     </>
   );
 
@@ -114,7 +120,9 @@ export function ProjectSidebar({
         </div>
       )}
 
-      <ProjectCreateWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onCreated={onProjectCreated} />
+      {isAdmin && (
+        <ProjectCreateWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onCreated={onProjectCreated} />
+      )}
     </>
   );
 }

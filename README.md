@@ -57,6 +57,32 @@ npm run dev
 
 자격증명이 없어도 백엔드는 기동되고 프로젝트/경쟁사 등록까지는 가능합니다. 실제 수집(`/collect`)은 `APIFY_TOKEN`이 있어야 동작합니다.
 
+## Viewer / Admin 권한
+
+사이트 기본 방문자는 **Viewer**(읽기 전용)입니다. 우상단 자물쇠(🔒) 아이콘으로 관리자 비밀번호를 입력하면
+**Admin**으로 전환되어 프로젝트/브랜드 생성·삭제, 자동 수집 설정, "지금 수집 실행" 등 데이터를 변경하거나
+Apify/Gemini 비용이 발생하는 기능을 쓸 수 있습니다. 사용자 계정 시스템이 아니라 "공용 Viewer + 공용 Admin
+비밀번호" 구조이며, Admin 세션은 8시간(기본값) 후 만료됩니다.
+
+`apps/api/.env`에 아래 값을 설정해야 Admin 로그인이 활성화됩니다 (비어 있으면 누구도 Admin이 될 수 없는
+안전한 기본값):
+
+```bash
+# 원본 비밀번호는 절대 .env에 넣지 않는다 — bcrypt hash만 저장
+cd apps/api && python -m scripts.hash_admin_password
+# → 출력된 hash를 ADMIN_PASSWORD_HASH에 붙여넣기
+
+python -c "import secrets; print(secrets.token_hex(32))"
+# → 출력된 값을 ADMIN_SESSION_SECRET에 붙여넣기
+```
+
+Vercel 등으로 프론트엔드/백엔드를 **서로 다른 도메인**에 배포하는 경우:
+- `ADMIN_PASSWORD_HASH` / `ADMIN_SESSION_SECRET`는 반드시 백엔드 호스팅의 **Server Environment
+  Variables**에 넣습니다 (Vercel의 `NEXT_PUBLIC_*`에는 절대 넣지 않습니다 — 클라이언트 번들에 그대로
+  노출됩니다).
+- `ADMIN_COOKIE_SAMESITE=none`, `ADMIN_COOKIE_SECURE=true`로 바꿔야 크로스 도메인 쿠키가 정상 전송됩니다.
+- `CORS_ALLOWED_ORIGINS`에 프론트엔드의 정확한 origin(예: `https://your-app.vercel.app`)을 등록해야 합니다.
+
 ## 데이터 수집 방식
 
 Meta Ad Library 스크래핑은 Apify의 `curious_coder/facebook-ads-library-scraper` 액터를 사용합니다

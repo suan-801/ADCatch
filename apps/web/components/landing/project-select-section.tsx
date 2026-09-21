@@ -5,6 +5,7 @@ import Link from "next/link";
 import { api } from "@/lib/api";
 import type { Project } from "@/lib/types";
 import { ProjectCreateWizard } from "@/components/project-create-wizard";
+import { useAuth } from "@/lib/auth-context";
 
 interface ProjectCardData {
   project: Project;
@@ -15,6 +16,7 @@ interface ProjectCardData {
 // 프로젝트 카드의 경쟁사/활성광고 수치는 기존 /projects, /projects/{id}/competitors,
 // /projects/{id}/dashboard 엔드포인트를 그대로 조합해 만든 실데이터다 (하드코딩 금지 — 브리핑 4장).
 export function ProjectSelectSection() {
+  const { isAdmin } = useAuth();
   const [cards, setCards] = useState<ProjectCardData[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -87,17 +89,21 @@ export function ProjectSelectSection() {
           {!cards && !error && <p className="col-span-full text-center text-sm text-muted">불러오는 중...</p>}
         </div>
 
-        <div className="mx-auto mt-10 flex max-w-sm justify-center">
-          <button
-            onClick={() => setWizardOpen(true)}
-            className="rounded-full bg-brand px-6 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          >
-            새 프로젝트
-          </button>
-        </div>
+        {isAdmin && (
+          <div className="mx-auto mt-10 flex max-w-sm justify-center">
+            <button
+              onClick={() => setWizardOpen(true)}
+              className="rounded-full bg-brand px-6 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+            >
+              새 프로젝트
+            </button>
+          </div>
+        )}
       </div>
 
-      <ProjectCreateWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onCreated={loadCards} />
+      {isAdmin && (
+        <ProjectCreateWizard open={wizardOpen} onClose={() => setWizardOpen(false)} onCreated={loadCards} />
+      )}
     </section>
   );
 }

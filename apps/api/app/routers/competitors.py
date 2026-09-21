@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps import get_current_user
+from app.deps import get_current_user, require_admin
 from app.models import Competitor, Project, User
 from app.schemas import CompetitorCreate, CompetitorOut
 from app.services.ad_library_collector import extract_page_id
@@ -26,6 +26,7 @@ def create_competitor(
     payload: CompetitorCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
+    _admin: bool = Depends(require_admin),
 ):
     """P0-18~22: Project 안의 모든 등록 대상은 동일한 '추적 브랜드'다. is_own_brand는 하위호환을
     위해 계속 받아들이지만(기본값 False) 이후 어떤 business logic에서도 사용하지 않는다."""

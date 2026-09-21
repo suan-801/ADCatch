@@ -11,13 +11,31 @@ import type {
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// Viewer/Admin 권한: Admin 세션은 HttpOnly 쿠키로 유지되므로(비밀번호/토큰을 localStorage 등에
+// 저장하지 않는다) 모든 요청에 credentials: "include"가 필요하다. 로컬 개발(localhost:3000 →
+// localhost:8000)은 same-site라 문제 없이 동작하고, frontend/backend가 다른 도메인으로 배포되면
+// (예: Vercel) ADMIN_COOKIE_SAMESITE=none + Secure=true, CORS_ALLOWED_ORIGINS에 정확한 프론트
+// origin을 등록해야 한다 (apps/api/.env.example 참고).
+class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.status = status;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     ...options,
   });
   if (!res.ok) {
-    throw new Error(`API ${path} failed: ${res.status} ${await res.text()}`);
+    if (res.status === 401 && typeof window !== "undefined") {
+      // Admin 세션 만료/부재 — AuthContext가 이 이벤트를 듣고 isAdmin을 내린다.
+      window.dispatchEvent(new CustomEvent("adcatcher:admin-unauthorized"));
+    }
+    throw new ApiError(`API ${path} failed: ${res.status} ${await res.text()}`, res.status);
   }
   return res.json() as Promise<T>;
 }
@@ -29,8 +47,13 @@ export const api = {
   updateProject: (projectId: string, payload: { auto_collect_enabled?: boolean }) =>
     request<Project>(`/projects/${projectId}`, { method: "PATCH", body: JSON.stringify(payload) }),
   deleteProject: async (projectId: string): Promise<void> => {
-    const res = await fetch(`${API_BASE}/projects/${projectId}`, { method: "DELETE" });
-    if (!res.ok) throw new Error(`API /projects/${projectId} delete failed: ${res.status} ${await res.text()}`);
+    const res = await fetch(`${API_BASE}/projects/${projectId}`, { method: "DELETE", credentials: "include" });
+    if (!res.ok) {
+      if (res.status === 401 && typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("adcatcher:admin-unauthorized"));
+      }
+      throw new ApiError(`API /projects/${projectId} delete failed: ${res.status} ${await res.text()}`, res.status);
+    }
   },
 
   getProject: (projectId: string) => request<Project>(`/projects/${projectId}`),
@@ -59,4 +82,11 @@ export const api = {
     if (params.competitorId) qs.set("competitor_id", params.competitorId);
     return request<AdChangesResponse>(`/projects/${projectId}/ad-changes?${qs.toString()}`);
   },
+
+  adminLogin: (password: string) =>
+    request<{ is_admin: boolean }>("/auth/admin", { method: "POST", body: JSON.stringify({ password }) }),
+  adminLogout: () => request<{ is_admin: boolean }>("/auth/logout", { method: "POST" }),
+  adminStatus: () => request<{ is_admin: boolean }>("/auth/status"),
 };
+
+export { ApiError };

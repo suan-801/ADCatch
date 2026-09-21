@@ -65,6 +65,14 @@ class ProjectOut(BaseModel):
     created_at: datetime
 
 
+class AdminLoginRequest(BaseModel):
+    password: str
+
+
+class AdminStatusOut(BaseModel):
+    is_admin: bool
+
+
 class CompetitorCreate(BaseModel):
     name: str
     ad_library_url: str
