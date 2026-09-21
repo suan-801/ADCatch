@@ -1,7 +1,4 @@
 """Microsoft Teams Incoming Webhook 알림.
-
-reference/marketing-os-course 의 레퍼런스에는 Slack 알림(_shared/scripts/daily_slack.py)만 있어
-그대로 이식할 코드가 없다 — PRD 4장 요구사항(Teams Webhook Alert)에 맞춰 새로 작성했다.
 """
 
 import httpx
@@ -10,30 +7,66 @@ from app.config import settings
 from app.schemas import SyncResult
 
 
-def _build_message_card(project_name: str, results: list[SyncResult], top_survivor: str | None) -> dict:
-    # P0-17: "신규 소재"는 DB INSERT 건수가 아니라 실제 STARTED 이벤트 기준으로 센다.
-    # is_baseline=True인 run의 new_ads는 "오늘 켠 광고"가 아니라 "처음 확인한 기존 집행 소재"이므로
-    # 별도 항목으로 분리해서 알리고, 신규 소재 합계에는 포함하지 않는다.
+def _build_message_card(
+    project_name: str,
+    results: list[SyncResult],
+    top_survivor: str | None,
+) -> dict:
+    # 실제 신규 광고만 집계
     total_started = sum(r.new_ads for r in results if not r.is_baseline)
-    total_baseline_discovered = sum(r.new_ads for r in results if r.is_baseline)
+
+    # 최초 수집 시 발견된 기존 광고
+    total_baseline_discovered = sum(
+        r.new_ads for r in results if r.is_baseline
+    )
+
+    # 새롭게 종료된 광고
     total_inactive = sum(r.newly_inactive for r in results)
 
+    # 변화가 있는지에 따라 문구 변경
+    if total_started == 0 and total_inactive == 0:
+        title = f"🐈‍⬛ [AD Catcher] {project_name} 오늘은 조용해요 🐾"
+        subtitle = "오늘 새롭게 포착된 변화가 없어요."
+    else:
+        title = f"🐈‍⬛ [AD Catcher] {project_name} 변화를 Catch했어요 🐾"
+        subtitle = "오늘 포착한 광고 변화를 알려드릴게요!"
+
     facts = [
-        {"name": "신규 소재", "value": f"{total_started}건"},
-        {"name": "종료 소재", "value": f"{total_inactive}건"},
+        {
+            "name": "🆕 신규 소재",
+            "value": f"**{total_started}건**",
+        },
+        {
+            "name": "⏹️ 종료 소재",
+            "value": f"**{total_inactive}건**",
+        },
     ]
+
     if total_baseline_discovered:
-        facts.append({"name": "처음 확인한 기존 소재(Baseline)", "value": f"{total_baseline_discovered}건"})
+        facts.append({
+            "name": "🔎 최초 확인 소재",
+            "value": f"**{total_baseline_discovered}건**",
+        })
+
     if top_survivor:
-        facts.append({"name": "최고 장수 소재", "value": top_survivor})
+        facts.append({
+            "name": "🏆 최고 장수 소재",
+            "value": top_survivor,
+        })
 
     return {
         "@type": "MessageCard",
         "@context": "http://schema.org/extensible-card",
-        "summary": f"ADCatcher 일일 수집 요약 — {project_name}",
-        "themeColor": "0F172A",
-        "title": f"📦 ADCatcher — {project_name} 일일 수집 완료",
-        "sections": [{"facts": facts, "markdown": True}],
+        "summary": f"AD Catcher 일일 수집 요약 — {project_name}",
+        "themeColor": "111827",
+        "title": title,
+        "text": subtitle,
+        "sections": [
+            {
+                "facts": facts,
+                "markdown": True,
+            }
+        ],
     }
 
 
