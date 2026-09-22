@@ -1,10 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import type { Project } from "@/lib/types";
+import type { CampaignTag, Competitor, Project } from "@/lib/types";
 import { ProjectSidebar } from "@/components/project-sidebar";
 import { CollectionFreshnessBadge } from "@/components/collection-freshness";
 import { AutoCatchToggle } from "@/components/auto-catch-toggle";
@@ -13,8 +13,22 @@ import { Modal } from "@/components/ui/modal";
 import { AdminModeControl } from "@/components/admin-mode-control";
 import { useAuth } from "@/lib/auth-context";
 
-// 브리핑 §20/§21: Project 내부를 "현재 현황" / "날짜별 변화" 두 관점으로 나누는 공용 셸.
-// 사이드바 + 프로젝트 헤더 + 서브내비를 여기서 한 번만 렌더링하고, 두 페이지는 콘텐츠만 채운다.
+type DashboardSection = "dashboard" | "changes" | "campaign-tags";
+
+function sectionFromPathname(pathname: string | null): DashboardSection {
+  if (pathname?.endsWith("/changes")) return "changes";
+  if (pathname?.endsWith("/campaign-tags")) return "campaign-tags";
+  return "dashboard";
+}
+
+function pathForSection(projectId: string, section: DashboardSection): string {
+  if (section === "changes") return `/dashboard/${projectId}/changes`;
+  if (section === "campaign-tags") return `/dashboard/${projectId}/campaign-tags`;
+  return `/dashboard/${projectId}`;
+}
+
+// 브리핑 §20/§21: Project 내부를 "현재 현황" / "날짜별 변화" / "캠페인 태그" 세 관점으로 나누는
+// 공용 셸. 사이드바 + 프로젝트 헤더 + 서브내비를 여기서 한 번만 렌더링하고, 페이지는 콘텐츠만 채운다.
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { projectId } = useParams<{ projectId: string }>();
   const router = useRouter();
@@ -22,6 +36,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { isAdmin } = useAuth();
 
   const [projects, setProjects] = useState<Project[]>([]);
+  const [competitors, setCompetitors] = useState<Competitor[]>([]);
+  const [campaignTags, setCampaignTags] = useState<CampaignTag[]>([]);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   // 헤더의 "⋯"(현재 프로젝트)와 사이드바 각 row의 "⋯"(임의의 프로젝트) 둘 다 이 하나의
@@ -33,8 +49,24 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     api.listProjects().then(setProjects).catch(() => {});
   }, []);
 
+  // §13-5 성능 최적화: competitors/campaignTags를 프로젝트당 1회만 여기서 fetch해 Context로
+  // 공유한다 — 대시보드/날짜별 변화/캠페인 태그 관리 탭을 오갈 때마다 각자 다시 fetch하지 않는다.
+  const refreshCompetitors = useCallback(async () => {
+    if (!projectId) return;
+    setCompetitors(await api.listCompetitors(projectId));
+  }, [projectId]);
+  const refreshCampaignTags = useCallback(async () => {
+    if (!projectId) return;
+    setCampaignTags(await api.listCampaignTags(projectId, true));
+  }, [projectId]);
+
+  useEffect(() => {
+    refreshCompetitors().catch(() => {});
+    refreshCampaignTags().catch(() => {});
+  }, [refreshCompetitors, refreshCampaignTags]);
+
   const currentProject = projects.find((p) => p.id === projectId);
-  const isChanges = pathname?.endsWith("/changes") ?? false;
+  const activeSection = sectionFromPathname(pathname);
 
   // Part E: 실제 생성/이동은 ProjectCreateWizard(Sidebar 내부)가 전담한다 — 여기서는
   // 사이드바 프로젝트 목록만 최신 상태로 새로고침한다.
@@ -70,13 +102,23 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   };
 
   return (
-    <ProjectContext.Provider value={{ project: currentProject ?? null, updateAutoCollect: handleToggleAutoCollect }}>
+    <ProjectContext.Provider
+      value={{
+        project: currentProject ?? null,
+        updateAutoCollect: handleToggleAutoCollect,
+        competitors,
+        refreshCompetitors,
+        campaignTags,
+        refreshCampaignTags,
+      }}
+    >
     <div className="flex min-h-screen bg-background">
       <ProjectSidebar
         projects={projects}
         selectedId={projectId}
         onSelect={(id) => {
-          router.push(isChanges ? `/dashboard/${id}/changes` : `/dashboard/${id}`);
+          // 다른 프로젝트로 전환해도 지금 보고 있던 탭(현재 현황/날짜별 변화/캠페인 태그)을 유지한다.
+          router.push(pathForSection(id, activeSection));
           setMobileNavOpen(false);
         }}
         onProjectCreated={refreshProjects}
@@ -149,7 +191,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Link
               href={`/dashboard/${projectId}`}
               className={`rounded-full px-4 py-1.5 transition-colors ${
-                !isChanges ? "bg-white text-brand-dark shadow-sm" : "text-muted hover:text-foreground"
+                activeSection === "dashboard" ? "bg-white text-brand-dark shadow-sm" : "text-muted hover:text-foreground"
               }`}
             >
               현재 현황
@@ -157,10 +199,18 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             <Link
               href={`/dashboard/${projectId}/changes`}
               className={`rounded-full px-4 py-1.5 transition-colors ${
-                isChanges ? "bg-white text-brand-dark shadow-sm" : "text-muted hover:text-foreground"
+                activeSection === "changes" ? "bg-white text-brand-dark shadow-sm" : "text-muted hover:text-foreground"
               }`}
             >
               날짜별 변화
+            </Link>
+            <Link
+              href={`/dashboard/${projectId}/campaign-tags`}
+              className={`rounded-full px-4 py-1.5 transition-colors ${
+                activeSection === "campaign-tags" ? "bg-white text-brand-dark shadow-sm" : "text-muted hover:text-foreground"
+              }`}
+            >
+              캠페인 태그
             </Link>
             </nav>
           </div>

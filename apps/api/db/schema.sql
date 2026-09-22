@@ -41,7 +41,26 @@ CREATE TABLE IF NOT EXISTS competitors (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- 4. Ads Table
+-- 4. Campaign Tags — 프로젝트별 사용자 정의 캠페인 분류 태그 (additive, 2026-09). 시스템에 고정된
+-- 카테고리를 두지 않고, 프로젝트마다 태그명+정의를 자유롭게 관리한다. ads.campaign_tag_id가 이
+-- 테이블을 참조하므로 ads보다 먼저 생성한다.
+CREATE TABLE IF NOT EXISTS campaign_tags (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id UUID REFERENCES projects(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    definition TEXT NOT NULL,
+    -- 삭제는 soft delete(is_active=FALSE)다 — 과거 소재에 이미 붙은 태그 표시/이력을 보존하기 위해
+    -- hard delete를 하지 않는다. 비활성 태그는 Gemini 분류 입력/수동 지정 후보에서 항상 제외된다.
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_campaign_tags_project ON campaign_tags(project_id);
+-- 동시 요청 경합 대비 DB 레벨 안전망(주 검증은 app.services.campaign_tags 서비스 레이어에서 수행).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_tags_project_name_active
+    ON campaign_tags(project_id, lower(name)) WHERE is_active;
+
+-- 5. Ads Table
 CREATE TABLE IF NOT EXISTS ads (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     competitor_id UUID REFERENCES competitors(id) ON DELETE CASCADE,
@@ -66,6 +85,24 @@ CREATE TABLE IF NOT EXISTS ads (
     analysis_retry_count INT DEFAULT 0,
     analysis_error TEXT,
     analyzed_at TIMESTAMPTZ,
+    -- Campaign Tag 자동 분류 (additive, 2026-09) — assignment_source("누가 지정했는가")와
+    -- campaign_classification_status("상태")를 분리한다. NEEDS_REVIEW는 상태이지 지정 주체가 아니다.
+    campaign_tag_id UUID REFERENCES campaign_tags(id) ON DELETE SET NULL,
+    campaign_tag_confidence DOUBLE PRECISION,
+    campaign_tag_reason TEXT,
+    campaign_tag_assignment_source VARCHAR(10), -- 'AI', 'USER', NULL(미지정)
+    campaign_tag_classified_at TIMESTAMPTZ,
+    campaign_classification_status VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING|SUCCESS|NEEDS_REVIEW|FAILED
+    campaign_classification_retry_count INT NOT NULL DEFAULT 0,
+    campaign_classification_error TEXT,
+    -- VIDEO/CAROUSEL 미디어 메타데이터 (additive, 2026-09) — image_url은 기존과 동일하게
+    -- "대표 썸네일 1장"으로 계속 쓰인다.
+    video_url TEXT, -- VIDEO 포맷 전용, HD 우선(SD fallback)
+    media_items JSONB, -- [{type, url, preview_url}] 카드/영상 원본 구조 보존
+    keyframe_urls JSONB, -- 캐싱된 keyframe URL 최대 4개
+    keyframe_status VARCHAR(20) NOT NULL DEFAULT 'NOT_APPLICABLE', -- NOT_APPLICABLE|PENDING|SUCCESS|FAILED
+    keyframe_retry_count INT NOT NULL DEFAULT 0,
+    keyframe_error TEXT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -78,7 +115,7 @@ CREATE INDEX IF NOT EXISTS idx_ads_archive_id ON ads(ad_archive_id);
 -- ads 테이블은 "현재 상태"만 담당한다. 아래 3개 테이블이 수집 실행 기록 / 관측 증거 /
 -- 상태 변화 이력을 각각 분리해서 담당한다. 기존 테이블 컬럼은 변경하지 않는다.
 
--- 5. Collection Runs — 경쟁사 1곳에 대한 수집 시도 1회 (성공/실패 명시적 기록)
+-- 6. Collection Runs — 경쟁사 1곳에 대한 수집 시도 1회 (성공/실패 명시적 기록)
 CREATE TABLE IF NOT EXISTS collection_runs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     competitor_id UUID REFERENCES competitors(id) ON DELETE CASCADE,
@@ -93,7 +130,7 @@ CREATE TABLE IF NOT EXISTS collection_runs (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- 6. Ad Observations — SUCCESS인 run에서 실제로 발견된 광고 (스냅샷 비교의 근거)
+-- 7. Ad Observations — SUCCESS인 run에서 실제로 발견된 광고 (스냅샷 비교의 근거)
 CREATE TABLE IF NOT EXISTS ad_observations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     collection_run_id UUID REFERENCES collection_runs(id) ON DELETE CASCADE,
@@ -103,7 +140,7 @@ CREATE TABLE IF NOT EXISTS ad_observations (
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
--- 7. Ad Status Events — 상태 "전환이 발생한 순간"에만 1건 생성 (반복 기록 금지)
+-- 8. Ad Status Events — 상태 "전환이 발생한 순간"에만 1건 생성 (반복 기록 금지)
 -- event_date는 KST(Asia/Seoul) 기준 캘린더 날짜로 고정 저장 (UTC 경계로 하루 밀림 방지)
 CREATE TABLE IF NOT EXISTS ad_status_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

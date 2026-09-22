@@ -12,7 +12,7 @@ from datetime import datetime
 import httpx
 
 from app.config import settings
-from app.schemas import AdFormat, RawAdItem
+from app.schemas import AdFormat, MediaItem, RawAdItem
 from app.services.timing import stage_timer
 
 APIFY_API_BASE = "https://api.apify.com/v2"
@@ -61,23 +61,72 @@ def get_dataset_items(dataset_id: str) -> list[dict]:
     return resp.json()
 
 
-def classify_format_and_image(item: dict) -> tuple[AdFormat, str | None]:
-    """Apify 아이템의 snapshot 에서 포맷(IMAGE/VIDEO/CAROUSEL)과 대표 썸네일 URL을 판별한다."""
+def classify_and_extract_media(item: dict) -> tuple[AdFormat, str | None, str | None, list[MediaItem]]:
+    """Apify 아이템의 snapshot에서 포맷(IMAGE/VIDEO/CAROUSEL), 대표 썸네일 URL, 대표 영상 URL,
+    미디어 원본 구조(media_items)를 판별한다.
+
+    reference/marketing-os-course/02_competitor/_scripts/fetch_competitor_ads.py::classify_and_extract()
+    의 검증된 로직(videos 전체 순회, video_hd_url 우선 SD fallback, 카드 내부 영상 처리)을
+    이식했다. 다만 이 저장소에는 실제 Apify raw response 샘플이나 APIFY_TOKEN이 없어(2026-09
+    확인) 라이브 재검증은 하지 못했다 — reference 로직을 그대로 신뢰해 이식했고, 실제 운영
+    데이터로 재검증이 필요하다(구현 보고서의 "남은 제한사항" 참고).
+
+    **format 결정 규칙은 카드 내부에 영상이 섞여 있어도 절대 바뀌지 않는다** — cards가 있으면
+    카드 중 일부/전부가 영상이어도 항상 CAROUSEL이다. "카드 내부 영상"은 media_items의 개별
+    항목 type에만 반영된다(CAROUSEL이 VIDEO로 오분류되는 것을 방지).
+    """
     snap = item.get("snapshot") or {}
     videos = snap.get("videos") or []
     images = snap.get("images") or []
     cards = snap.get("cards") or []
 
     if videos:
-        v = videos[0]
-        return AdFormat.VIDEO, v.get("video_preview_image_url")
+        first_video = videos[0]
+        video_url = first_video.get("video_hd_url") or first_video.get("video_sd_url")
+        # 하위 호환: 갤러리 대표 썸네일은 기존과 동일하게 video_preview_image_url을 그대로 쓴다.
+        representative_image_url = first_video.get("video_preview_image_url")
+        media_items = [
+            MediaItem(
+                type="video",
+                url=(v.get("video_hd_url") or v.get("video_sd_url") or ""),
+                preview_url=v.get("video_preview_image_url"),
+            )
+            for v in videos
+            if v.get("video_hd_url") or v.get("video_sd_url")
+        ]
+        return AdFormat.VIDEO, representative_image_url, video_url, media_items
+
     if cards:
-        first = cards[0]
-        return AdFormat.CAROUSEL, first.get("original_image_url") or first.get("resized_image_url")
+        media_items = []
+        representative_image_url: str | None = None
+        for card in cards:
+            card_video_url = card.get("video_hd_url") or card.get("video_sd_url")
+            card_image_url = card.get("original_image_url") or card.get("resized_image_url")
+            if card_video_url:
+                media_items.append(MediaItem(type="video", url=card_video_url, preview_url=card_image_url))
+                # 대표 썸네일 후보 — 첫 카드가 영상이라 자체 이미지가 없어도(포스터가 없는 경우)
+                # 갤러리 썸네일이 비지 않도록, 영상 카드의 preview가 있으면 그것도 후보로 삼는다.
+                if representative_image_url is None and card_image_url:
+                    representative_image_url = card_image_url
+            elif card_image_url:
+                media_items.append(MediaItem(type="image", url=card_image_url))
+                if representative_image_url is None:
+                    representative_image_url = card_image_url
+        # CAROUSEL은 카드 안에 영상이 섞여 있어도 포맷이 절대 VIDEO로 바뀌지 않는다. 카드 내부
+        # 영상의 다운로드/keyframe 캐싱은 이번 범위 밖(§8) — Drawer는 preview_url을 그대로 보여준다.
+        return AdFormat.CAROUSEL, representative_image_url, None, media_items
+
     if images:
+        media_items = [
+            MediaItem(type="image", url=(img.get("original_image_url") or img.get("resized_image_url") or ""))
+            for img in images
+            if img.get("original_image_url") or img.get("resized_image_url")
+        ]
         img = images[0]
-        return AdFormat.IMAGE, img.get("original_image_url") or img.get("resized_image_url")
-    return AdFormat.IMAGE, None
+        representative_image_url = img.get("original_image_url") or img.get("resized_image_url")
+        return AdFormat.IMAGE, representative_image_url, None, media_items
+
+    return AdFormat.IMAGE, None, None, []
 
 
 def _extract_caption(item: dict) -> str | None:
@@ -97,7 +146,7 @@ def parse_items(items: list[dict], page_id: str) -> list[RawAdItem]:
         ad_archive_id = str(item.get("ad_archive_id") or item.get("adArchiveID") or item.get("id") or "")
         if not ad_archive_id:
             continue
-        fmt, image_url = classify_format_and_image(item)
+        fmt, image_url, video_url, media_items = classify_and_extract_media(item)
         start_ts = snap.get("creation_time") or item.get("start_date")
         start_date = datetime.fromtimestamp(int(start_ts)) if start_ts else None
         parsed.append(
@@ -110,6 +159,8 @@ def parse_items(items: list[dict], page_id: str) -> list[RawAdItem]:
                 image_url=image_url,
                 format=fmt,
                 start_date=start_date,
+                video_url=video_url,
+                media_items=media_items,
             )
         )
     return parsed

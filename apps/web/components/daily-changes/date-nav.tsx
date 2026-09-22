@@ -7,7 +7,9 @@ import { todayKst } from "@/lib/types";
 // toISOString()으로 "UTC" 기준 문자열을 뽑아썼다 — KST(UTC+9)에서는 이 둘이 어긋나서
 // 하루씩(때로는 이틀씩) 밀렸다. 이제는 끝까지 UTC 기준(Date.UTC/setUTCDate)으로만 계산해
 // 로컬 시간대와 무관하게 항상 정확히 deltaDays만큼만 이동한다.
-function shiftDate(dateStr: string, deltaDays: number): string {
+// WeekNav(components/daily-changes/week-nav.tsx)가 그대로 재사용한다 — 새 날짜 연산 로직을
+// 중복 작성하지 않는다.
+export function shiftDate(dateStr: string, deltaDays: number): string {
   const [y, m, d] = dateStr.split("-").map(Number);
   const date = new Date(Date.UTC(y, m - 1, d));
   date.setUTCDate(date.getUTCDate() + deltaDays);

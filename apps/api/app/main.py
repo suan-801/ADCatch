@@ -4,8 +4,9 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import ad_changes, ads, auth, competitors, dashboard, projects
-from app.routers.ads import ad_detail_router
+from app.routers import ad_changes, ads, auth, campaign_tags, competitors, dashboard, projects
+from app.routers.ads import ad_detail_router, project_ads_router
+from app.routers.campaign_tags import tag_detail_router
 
 app = FastAPI(title="ADCatcher API", version="0.1.0")
 
@@ -42,8 +43,11 @@ app.include_router(projects.router)
 app.include_router(competitors.router)
 app.include_router(ads.router)
 app.include_router(ad_detail_router)
+app.include_router(project_ads_router)
 app.include_router(dashboard.router)
 app.include_router(ad_changes.router)
+app.include_router(campaign_tags.router)
+app.include_router(tag_detail_router)
 
 
 @app.on_event("startup")

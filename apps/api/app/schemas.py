@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class AdStatus(str, Enum):
@@ -29,6 +29,30 @@ class ProjectStatus(str, Enum):
     PAUSED = "PAUSED"
 
 
+# ── Campaign Tag 자동 분류 (additive, 2026-09) ─────────────────────────────
+# assignment_source("누가 지정했는가")와 classification_status("상태")는 서로 다른 축이다 —
+# NEEDS_REVIEW는 상태이지 지정 주체가 아니므로 source enum에 섞지 않는다.
+
+class CampaignTagAssignmentSource(str, Enum):
+    AI = "AI"
+    USER = "USER"
+
+
+class CampaignClassificationStatus(str, Enum):
+    PENDING = "PENDING"
+    SUCCESS = "SUCCESS"
+    NEEDS_REVIEW = "NEEDS_REVIEW"
+    FAILED = "FAILED"
+
+
+# ── VIDEO/CAROUSEL 미디어 메타데이터 (additive, 2026-09) ───────────────────
+
+class MediaItem(BaseModel):
+    type: str  # "image" | "video"
+    url: str
+    preview_url: str | None = None
+
+
 # ── Raw collector output (per-fetch, before DB sync) ──────────────────────
 
 class RawAdItem(BaseModel):
@@ -40,6 +64,10 @@ class RawAdItem(BaseModel):
     image_url: str | None = None
     format: AdFormat
     start_date: datetime | None = None
+    # VIDEO 포맷 전용 대표 영상 URL(HD 우선, SD fallback). CAROUSEL/IMAGE는 NULL — 개별 카드 영상은
+    # media_items에만 담긴다.
+    video_url: str | None = None
+    media_items: list[MediaItem] = []
 
 
 # ── API request/response models ───────────────────────────────────────────
@@ -94,7 +122,67 @@ class CompetitorOut(BaseModel):
     created_at: datetime
 
 
-class AdOut(BaseModel):
+class CampaignTagCreate(BaseModel):
+    name: str
+    definition: str
+
+
+class CampaignTagUpdate(BaseModel):
+    """부분 업데이트 — 전달된 필드만 반영한다."""
+
+    name: str | None = None
+    definition: str | None = None
+
+
+class CampaignTagOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    name: str
+    definition: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class CampaignTagReclassifyRequest(BaseModel):
+    # USER가 직접 지정한 소재까지 재분류 대상에 포함할지 — 기본 false(사용자 지정값은 항상 보존).
+    include_user_assigned: bool = False
+
+
+class CampaignTagReclassifyResult(BaseModel):
+    reset_count: int
+
+
+class AdCampaignTagUpdate(BaseModel):
+    campaign_tag_id: uuid.UUID
+
+
+# ── Ad 미디어/캠페인 태그 공용 필드 믹스인 ──────────────────────────────────
+# AdOut/ChangedAdOut가 이 필드셋을 공유한다 (Campaign Tag + VIDEO/CAROUSEL 미디어, 둘 다 additive).
+
+class _AdMediaAndCampaignFields(BaseModel):
+    campaign_tag_id: uuid.UUID | None = None
+    campaign_tag_confidence: float | None = None
+    campaign_tag_reason: str | None = None
+    campaign_tag_assignment_source: CampaignTagAssignmentSource | None = None
+    campaign_tag_classified_at: datetime | None = None
+    campaign_classification_status: CampaignClassificationStatus = CampaignClassificationStatus.PENDING
+    video_url: str | None = None
+    media_items: list[MediaItem] = []
+    keyframe_urls: list[str] = []
+    keyframe_status: str = "NOT_APPLICABLE"
+
+    # DB 컬럼은 nullable JSON이라 미설정 행은 NULL(=Python None)이다 — 빈 리스트로 정규화해
+    # 프론트가 항상 배열을 받을 수 있게 한다(null 체크를 프론트 곳곳에 흩뿌리지 않기 위함).
+    @field_validator("media_items", "keyframe_urls", mode="before")
+    @classmethod
+    def _default_empty_list(cls, v: object) -> object:
+        return v or []
+
+
+class AdOut(_AdMediaAndCampaignFields):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
@@ -119,6 +207,12 @@ class AdOut(BaseModel):
     @property
     def survival_days(self) -> int:
         return max((self.last_seen_at - self.first_seen_at).days, 0)
+
+
+class AdWithCompetitorOut(AdOut):
+    """프로젝트 전체 Ad 목록(성능 최적화용 신규 엔드포인트)에서 브랜드명을 함께 반환한다."""
+
+    competitor_name: str
 
 
 class DashboardMetrics(BaseModel):
@@ -160,7 +254,7 @@ class CollectionStatus(str, Enum):
     NO_RECORD = "NO_RECORD"
 
 
-class ChangedAdOut(BaseModel):
+class ChangedAdOut(_AdMediaAndCampaignFields):
     """AdOut + 이 날짜에 발생한 이벤트 배지. 기존 AdOut 필드를 그대로 포함해
     프론트가 기존 Ad Card 컴포넌트를 그대로 재사용할 수 있게 한다."""
 
@@ -185,6 +279,10 @@ class ChangedAdOut(BaseModel):
     # P1-01: 이 이벤트가 발생한 순간에 고정된 집행/추적 일수. None이면(이 필드 도입 이전 이벤트)
     # 프론트가 현재 ad 값 기준으로 라이브 계산한다(fake backfill 금지).
     survival_days_at_event: int | None = None
+    # 기간(Range) 조회에서만 채워진다 — 동일 광고가 기간 내 여러 이벤트를 가질 때 각각을 구분하기
+    # 위함. 단일 날짜 조회(get_ad_changes)는 이 필드를 채우지 않는다(항상 None) — 이미 date로
+    # 스코프됐으므로 불필요.
+    event_date: date | None = None
 
 
 class AdChangeSummary(BaseModel):
@@ -248,3 +346,56 @@ class CollectionFreshness(BaseModel):
     partial_competitors: int
     partial_competitor_names: list[str]
     failed_competitor_names: list[str]
+
+
+# ── 기간(주간) 조회 API (additive, 2026-09) ─────────────────────────────────
+
+class CollectionRunSummary(BaseModel):
+    """범위 내 실제 CollectionRun 시도만 status별로 집계한 값 — "시도 안 함"(해당 날짜가
+    dates_with_collection에 없음)과 "시도했지만 실패"(failed에 포함)를 명확히 구분한다.
+    (경쟁사×날짜) 그리드를 억지로 채워 단일 SUCCESS/PARTIAL/FAILED/NO_RECORD 값으로 뭉개지 않는다 —
+    자동수집을 켜지 않은 날의 "기록 없음"이 "실패"처럼 보이는 것을 방지하기 위함."""
+
+    success: int
+    partial: int
+    failed: int
+
+
+class AdChangesRangeResponse(BaseModel):
+    project_id: uuid.UUID
+    start_date: date
+    end_date: date
+    competitor_id: uuid.UUID | None
+    collection_run_summary: CollectionRunSummary
+    dates_with_collection: list[date]
+    latest_collection_at: datetime | None
+    history_available_from: date | None
+    baseline_discovered_count: int
+    summary: AdChangeSummary
+    started_ads: list[ChangedAdOut]
+    reactivated_ads: list[ChangedAdOut]
+    stopped_ads: list[ChangedAdOut]
+    # unique 광고 기준 집계(§6-1) — 동일 광고가 기간 내 STARTED+REACTIVATED를 모두 가져도 1회만
+    # 카운트한다. 변화 목록(started_ads 등)은 event 기준으로 dedupe하지 않는다.
+    visual_pattern: dict[str, int]
+    # 캠페인 태그 이름이 아니라 campaign_tag_id(str) 또는 "NEEDS_REVIEW"를 키로 사용한다 — 프론트가
+    # 프로젝트의 캠페인 태그 목록과 join해 이름을 표시한다. 재분류 시 과거 기간 집계도 함께 바뀐다
+    # (현재 태그 분류 기준으로 항상 재계산 — docs/DATA_SEMANTICS.md 참고).
+    campaign_mix: dict[str, int]
+
+
+# ── 성능 최적화용 통합 조회 API (additive, 2026-09) ─────────────────────────
+
+class ProjectSummaryOut(BaseModel):
+    """랜딩 페이지 프로젝트 카드용 — 기존 listProjects+N×(listCompetitors+getDashboard) 조합을
+    단일 호출로 대체한다(§13 성능 최적화). 값의 의미는 기존 조합과 동일하다."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    name: str
+    status: ProjectStatus
+    auto_collect_enabled: bool
+    created_at: datetime
+    competitor_count: int
+    active_ad_count: int

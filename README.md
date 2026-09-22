@@ -112,6 +112,34 @@ python -m scripts.process_pending_analysis --limit 50  # 이번 실행만 50건�
 `gemini_analysis_max_retries`(환경변수로도 override 가능)로 조정합니다. 자세한 lifecycle은
 [`docs/DATA_SEMANTICS.md`](./docs/DATA_SEMANTICS.md) §8 참고.
 
+## Campaign Tag 자동 분류 (2026-09)
+
+프로젝트별로 "캠페인 태그 관리" 화면(`/dashboard/{projectId}/campaign-tags`)에서 태그 이름/정의를
+직접 관리합니다. 신규 소재는 수집 시 Gemini가 자동 분류하고, quota/오류로 미분류 상태(`PENDING`)로
+남은 소재나 재분류 대상은 Daily Scheduler가 함께 처리합니다. 즉시 재시도하려면:
+
+```bash
+cd apps/api
+python -m scripts.process_pending_campaign_classification
+python -m scripts.process_pending_campaign_classification --limit 50
+```
+
+자세한 assignment_source/classification_status 의미와 재분류 규칙은
+[`docs/DATA_SEMANTICS.md`](./docs/DATA_SEMANTICS.md) §9 참고.
+
+## VIDEO Keyframe 캐싱 (2026-09)
+
+VIDEO 소재의 대표 keyframe(최대 4장)은 수집과 완전히 분리된 별도 배치가 생성합니다 — 시스템에
+**ffmpeg/ffprobe**가 설치돼 있어야 동작하며, 없으면 자동 감지되어 즉시 실패 처리됩니다(기존 preview
+썸네일로 정상 폴백되므로 필수 설치는 아닙니다). 즉시 재시도하려면:
+
+```bash
+cd apps/api
+python -m scripts.process_pending_video_keyframes
+```
+
+자세한 필드 의미는 [`docs/DATA_SEMANTICS.md`](./docs/DATA_SEMANTICS.md) §10 참고.
+
 ## DB 스키마 변경 시 주의
 
 `apps/api/app/main.py`는 기동 시 `Base.metadata.create_all()`을 실행하지만, 이는 **존재하지 않는
@@ -120,6 +148,7 @@ DB에 스키마 변경을 반영하려면 `apps/api/db/migrations/`의 additive 
 
 ```bash
 psql "$DATABASE_URL" -f apps/api/db/migrations/001_product_stabilization.sql
+psql "$DATABASE_URL" -f apps/api/db/migrations/002_campaign_tags_and_media.sql
 ```
 
 신규 마이그레이션을 추가할 때도 `ADD COLUMN IF NOT EXISTS` 등 기존 데이터를 보존하는 additive 방식만

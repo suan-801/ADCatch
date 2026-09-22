@@ -3,18 +3,21 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import type { Project } from "@/lib/types";
+import type { ProjectSummary } from "@/lib/types";
 import { ProjectCreateWizard } from "@/components/project-create-wizard";
 import { useAuth } from "@/lib/auth-context";
 
 interface ProjectCardData {
-  project: Project;
+  project: ProjectSummary;
   competitorCount: number;
   activeAdCount: number;
 }
 
-// 프로젝트 카드의 경쟁사/활성광고 수치는 기존 /projects, /projects/{id}/competitors,
-// /projects/{id}/dashboard 엔드포인트를 그대로 조합해 만든 실데이터다 (하드코딩 금지 — 브리핑 4장).
+// §13-2 성능 최적화: 프로젝트 카드의 경쟁사/활성광고 수치는 이전엔 /projects + N×
+// (/projects/{id}/competitors + /projects/{id}/dashboard)를 조합해 만들었다(2N+1회 호출).
+// 지금은 GET /projects/summary 1회로 동일한 값을 받는다(하드코딩 금지 — 브리핑 4장, 값의 의미는
+// 기존과 동일). 기존 listProjects/listCompetitors/getDashboard는 다른 화면에서 계속 쓰이므로
+// 삭제하지 않는다.
 export function ProjectSelectSection() {
   const { isAdmin } = useAuth();
   const [cards, setCards] = useState<ProjectCardData[] | null>(null);
@@ -23,22 +26,15 @@ export function ProjectSelectSection() {
 
   const loadCards = () => {
     api
-      .listProjects()
-      .then(async (projects) => {
-        const enriched = await Promise.all(
-          projects.map(async (project) => {
-            const [competitors, dashboard] = await Promise.all([
-              api.listCompetitors(project.id).catch(() => []),
-              api.getDashboard(project.id).catch(() => null),
-            ]);
-            return {
-              project,
-              competitorCount: competitors.length,
-              activeAdCount: dashboard?.active_count ?? 0,
-            };
-          }),
+      .listProjectsSummary()
+      .then((summaries) => {
+        setCards(
+          summaries.map((project) => ({
+            project,
+            competitorCount: project.competitor_count,
+            activeAdCount: project.active_ad_count,
+          })),
         );
-        setCards(enriched);
       })
       .catch((e) => setError(String(e)));
   };

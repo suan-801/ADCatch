@@ -1,17 +1,20 @@
-import type { Ad, AdFormat, AdStatus, VisualType } from "@/lib/types";
+import type { Ad, AdFormat, AdStatus, CampaignTag, VisualType } from "@/lib/types";
 
 // Part B — Gallery Filters. Brand 필터(기존 CompetitorFilter)는 그대로 유지하고, 이 컴포넌트는
-// Status/Format/Visual/카피 검색만 추가로 담당한다. "70% 업무 툴" 톤을 유지하기 위해 select
-// dropdown 위주로 구성하고 pill을 남발하지 않는다.
+// Status/Format/Visual/캠페인 태그/카피 검색만 추가로 담당한다. "70% 업무 툴" 톤을 유지하기 위해
+// select dropdown 위주로 구성하고 pill을 남발하지 않는다.
 
 export type StatusFilterValue = "ALL" | AdStatus;
 export type FormatFilterValue = "ALL" | AdFormat;
 export type VisualFilterValue = "ALL" | VisualType | "UNANALYZED";
+// tag id 문자열 | "ALL" | "NEEDS_REVIEW"(검토 필요 — NEEDS_REVIEW 상태 또는 아직 태그가 없는 소재).
+export type CampaignTagFilterValue = "ALL" | "NEEDS_REVIEW" | string;
 
 export interface GalleryFilterState {
   status: StatusFilterValue;
   format: FormatFilterValue;
   visual: VisualFilterValue;
+  campaignTagId: CampaignTagFilterValue;
   search: string;
 }
 
@@ -19,12 +22,17 @@ export const DEFAULT_GALLERY_FILTERS: GalleryFilterState = {
   status: "ALL",
   format: "ALL",
   visual: "ALL",
+  campaignTagId: "ALL",
   search: "",
 };
 
 export function isGalleryFilterActive(filters: GalleryFilterState): boolean {
   return (
-    filters.status !== "ALL" || filters.format !== "ALL" || filters.visual !== "ALL" || filters.search.trim() !== ""
+    filters.status !== "ALL" ||
+    filters.format !== "ALL" ||
+    filters.visual !== "ALL" ||
+    filters.campaignTagId !== "ALL" ||
+    filters.search.trim() !== ""
   );
 }
 
@@ -36,6 +44,11 @@ export function applyGalleryFilters<T extends Ad>(ads: T[], filters: GalleryFilt
     if (filters.visual === "UNANALYZED") {
       if (ad.visual_type !== null) return false;
     } else if (filters.visual !== "ALL" && ad.visual_type !== filters.visual) {
+      return false;
+    }
+    if (filters.campaignTagId === "NEEDS_REVIEW") {
+      if (ad.campaign_tag_id !== null) return false;
+    } else if (filters.campaignTagId !== "ALL" && ad.campaign_tag_id !== filters.campaignTagId) {
       return false;
     }
     if (q) {
@@ -75,10 +88,14 @@ const selectClass =
 export function GalleryFilters({
   value,
   onChange,
+  campaignTags = [],
 }: {
   value: GalleryFilterState;
   onChange: (next: GalleryFilterState) => void;
+  /** 캠페인 태그 필터 드롭다운 옵션 — 없으면(프로젝트에 태그가 없으면) 필터 자체를 숨긴다. */
+  campaignTags?: CampaignTag[];
 }) {
+  const activeCampaignTags = campaignTags.filter((t) => t.is_active);
   return (
     <div className="flex flex-wrap items-center gap-2">
       <select
@@ -119,6 +136,23 @@ export function GalleryFilters({
           </option>
         ))}
       </select>
+
+      {activeCampaignTags.length > 0 && (
+        <select
+          value={value.campaignTagId}
+          onChange={(e) => onChange({ ...value, campaignTagId: e.target.value })}
+          className={selectClass}
+          aria-label="캠페인 태그 필터"
+        >
+          <option value="ALL">캠페인 태그: 전체</option>
+          {activeCampaignTags.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+          <option value="NEEDS_REVIEW">검토 필요</option>
+        </select>
+      )}
 
       <input
         value={value.search}

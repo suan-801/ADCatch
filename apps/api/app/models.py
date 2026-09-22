@@ -1,7 +1,7 @@
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, String, Text, Uuid, func
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, JSON, String, Text, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 # SQLAlchemy 2.0의 범용 Uuid 타입 사용 — Postgres에서는 네이티브 UUID로,
@@ -89,7 +89,52 @@ class Ad(Base):
     analyzed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
+    # ── Campaign Tag 자동 분류 (additive, 2026-09) ──────────────────────
+    # assignment_source("누가 지정했는가")와 classification_status("상태")를 분리한다 — 상태값을
+    # source 필드에 섞어 넣지 않는다(NEEDS_REVIEW는 상태이지 지정 주체가 아니다).
+    campaign_tag_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("campaign_tags.id", ondelete="SET NULL"), nullable=True
+    )
+    campaign_tag_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    campaign_tag_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 'AI' | 'USER' | NULL(아직 아무도 지정하지 않음)
+    campaign_tag_assignment_source: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    campaign_tag_classified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # 'PENDING' | 'SUCCESS' | 'NEEDS_REVIEW' | 'FAILED' — analysis_status와 동일한 lifecycle 패턴.
+    campaign_classification_status: Mapped[str] = mapped_column(String(20), default="PENDING")
+    campaign_classification_retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    campaign_classification_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # ── VIDEO/CAROUSEL 미디어 메타데이터 (additive, 2026-09) ─────────────
+    # image_url은 기존과 동일하게 "대표 썸네일 1장"으로 계속 쓰인다. video_url/media_items는
+    # 원본 구조를 추가로 보존해 VIDEO 상세(keyframe)/CAROUSEL 상세(카드 구성) UI에 쓴다.
+    video_url: Mapped[str | None] = mapped_column(Text, nullable=True)  # VIDEO 포맷 전용, HD 우선
+    media_items: Mapped[list | None] = mapped_column(JSON, nullable=True)  # [{type, url, preview_url}]
+    keyframe_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)  # 캐싱된 keyframe URL 최대 4개
+    # NOT_APPLICABLE(비-VIDEO) | PENDING | SUCCESS | FAILED
+    keyframe_status: Mapped[str] = mapped_column(String(20), default="NOT_APPLICABLE")
+    keyframe_retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    keyframe_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     competitor: Mapped["Competitor"] = relationship(back_populates="ads")
+    campaign_tag: Mapped["CampaignTag | None"] = relationship()
+
+
+class CampaignTag(Base):
+    """프로젝트별로 사용자가 직접 정의하는 캠페인 분류 태그 (additive, 2026-09).
+    시스템에 고정된 카테고리를 두지 않고, 프로젝트마다 태그명+정의를 자유롭게 관리한다."""
+
+    __tablename__ = "campaign_tags"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"))
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    definition: Mapped[str] = mapped_column(Text, nullable=False)
+    # 삭제는 soft delete(is_active=False)다 — 과거 소재에 이미 붙은 태그 표시/이력을 보존하기 위해
+    # hard delete를 하지 않는다. 비활성 태그는 Gemini 분류 입력/수동 지정 후보에서 항상 제외된다.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
 # ── Daily Ad Change History (additive, 2026-09) ────────────────────────────

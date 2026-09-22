@@ -1,13 +1,34 @@
-import type { Ad } from "@/lib/types";
+import type { Ad, CampaignTag } from "@/lib/types";
 import { runningDays, survivalDays } from "@/lib/types";
 import { StatusBadge } from "@/components/status-badge";
 
 type GalleryAd = Ad & { competitor_name?: string };
 
+function CampaignTagBadge({ ad, campaignTags }: { ad: GalleryAd; campaignTags: CampaignTag[] }) {
+  const tag = campaignTags.find((t) => t.id === ad.campaign_tag_id);
+  if (tag) {
+    return (
+      <span className="truncate rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-muted">
+        {tag.name}
+        {ad.campaign_tag_assignment_source === "AI" ? " · AI 분류" : ""}
+      </span>
+    );
+  }
+  if (ad.campaign_classification_status === "NEEDS_REVIEW") {
+    return (
+      <span className="truncate rounded-full bg-brand-cream px-2 py-0.5 text-[10px] font-semibold text-brand-dark">
+        검토 필요
+      </span>
+    );
+  }
+  return null;
+}
+
 export function AdGallery({
   ads,
   totalCount,
   onCardClick,
+  campaignTags = [],
 }: {
   /** 필터 적용 후 렌더링할 소재 목록. */
   ads: GalleryAd[];
@@ -15,6 +36,8 @@ export function AdGallery({
    * 구분하기 위해 필요하다. */
   totalCount: number;
   onCardClick: (ad: GalleryAd) => void;
+  /** 카드에 캠페인 태그 배지를 표시하기 위한 프로젝트의 태그 목록(선택 — 없으면 배지 생략). */
+  campaignTags?: CampaignTag[];
 }) {
   const sorted = [...ads].sort((a, b) => survivalDays(b) - survivalDays(a));
 
@@ -85,6 +108,18 @@ export function AdGallery({
                   비주얼 분석 대기
                 </span>
               )}
+              {/* VIDEO/CAROUSEL 판별 배지 — 목록에서는 대표 썸네일 1장만 보여주고(keyframe 4장을
+                  펼치지 않음), 포맷만 아이콘/배지로 구분한다. */}
+              {ad.format === "VIDEO" && (
+                <span className="absolute bottom-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-foreground/80 text-xs text-white">
+                  ▶
+                </span>
+              )}
+              {ad.format === "CAROUSEL" && ad.media_items.some((m) => m.type === "video") && (
+                <span className="absolute bottom-2 left-2 rounded-full bg-foreground/80 px-2 py-1 text-[9px] font-semibold text-white">
+                  캐러셀 · 영상 포함
+                </span>
+              )}
             </div>
             <div className="space-y-2 p-4">
               <div className="flex items-center justify-between gap-2">
@@ -93,6 +128,7 @@ export function AdGallery({
                   <span className="truncate text-xs font-medium text-muted">{ad.competitor_name}</span>
                 )}
               </div>
+              <CampaignTagBadge ad={ad} campaignTags={campaignTags} />
               {ad.copy_text && <p className="line-clamp-2 text-sm text-foreground">{ad.copy_text}</p>}
               {ad.cta_text && <p className="text-xs text-muted">CTA: {ad.cta_text}</p>}
             </div>

@@ -11,6 +11,8 @@ GitHub Actions/Cloud Scheduler" 중 후자를 단순화 목적으로 선택).
   4) Part A — Pending Gemini Analysis Retry: 위 Daily Collection이 전부 끝난 뒤, 이전
      수집들에서 PENDING으로 남아있던 소재를 별도 step으로 재시도한다. 이 step은 Core
      Collection과 완전히 분리되어 있어(A-07), 실패해도 위 1~3단계 결과에 영향을 주지 않는다.
+  5) Campaign Tag Pending Classification Retry (2026-09): 마찬가지로 완전히 독립된 step.
+  6) VIDEO Keyframe Pending 캐싱 (2026-09): 마찬가지로 완전히 독립된 step.
 
 사용법:
   cd apps/api && python -m scripts.run_daily_collection
@@ -32,6 +34,8 @@ from app.services.ad_library_collector import ApifyRunError, fetch_live_ads
 from app.services.ad_sync import synchronize_ad_status
 from app.services.autopause import apply_auto_pause
 from app.services.pending_analysis import process_pending_analysis
+from app.services.pending_campaign_classification import process_pending_campaign_classification
+from app.services.pending_video_keyframes import process_pending_video_keyframes
 
 
 def run() -> None:
@@ -89,6 +93,29 @@ def run() -> None:
             )
         except Exception as e:  # noqa: BLE001 - 의도적으로 광범위하게 격리 (A-07)
             print(f"[pending-analysis] 재시도 배치 실패(무시하고 계속): {e}")
+
+        # 캠페인 태그 분류/영상 keyframe 캐싱도 동일한 원칙(enrichment는 core와 완전히 분리)으로
+        # 각각 독립된 step에서 실행한다 — 하나가 실패해도 나머지 step에 영향을 주지 않는다.
+        try:
+            campaign_summary = process_pending_campaign_classification(db)
+            print(
+                f"[pending-campaign-classification] processed={campaign_summary.processed} "
+                f"succeeded={campaign_summary.succeeded} needs_review={campaign_summary.needs_review} "
+                f"still_pending={campaign_summary.still_pending} failed={campaign_summary.failed} "
+                f"quota_stopped={campaign_summary.quota_stopped}"
+            )
+        except Exception as e:  # noqa: BLE001 - 의도적으로 광범위하게 격리
+            print(f"[pending-campaign-classification] 재시도 배치 실패(무시하고 계속): {e}")
+
+        try:
+            keyframe_summary = process_pending_video_keyframes(db)
+            print(
+                f"[pending-video-keyframes] processed={keyframe_summary.processed} "
+                f"succeeded={keyframe_summary.succeeded} still_pending={keyframe_summary.still_pending} "
+                f"failed={keyframe_summary.failed}"
+            )
+        except Exception as e:  # noqa: BLE001 - 의도적으로 광범위하게 격리
+            print(f"[pending-video-keyframes] 재시도 배치 실패(무시하고 계속): {e}")
     finally:
         db.close()
 

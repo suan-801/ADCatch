@@ -50,9 +50,12 @@
 | **라이브 관리** | **Active/Inactive & 수명 계산** | 라이브러리 발견 시 `Active`(생존일수 +1), 미발견 시 `Inactive` 처리. 14일 연속 미노출 시 아카이빙 |
 | **온보딩** | **Initial Baseline + Daily Catch Opt-in** | 브랜드 등록 후 첫 완전한 성공 수집이 Baseline이 되며(`docs/DATA_SEMANTICS.md` §3), Baseline 완료 시에만 "매일 변화 CATCH하기" opt-in CTA를 노출 |
 | **변화 추적** | **Daily Ad Change History** | 날짜 × 브랜드 기준으로 그 날 켠(STARTED/REACTIVATED)/끈(STOPPED) 광고와 비주얼 패턴을 조회 |
+| **변화 추적** | **기간(주간) 조회** (2026-09) | 메인 대시보드에서 월~일 기본 주간 단위로 광고 변화를 조회한다(`GET .../ad-changes/range`, 좌우로 이전/다음 주 이동 + 커스텀 시작·종료일 선택). 기존 단일 날짜 조회(`GET .../ad-changes`, `/changes` 라우트)는 그대로 유지되며, 두 조회 모두 `AdStatusEvent`를 원본으로 삼아 동일 광고가 기간 내 여러 이벤트를 가져도 각각 보존한다(`docs/DATA_SEMANTICS.md` §11). |
 | **신뢰도 표시** | **Collection Freshness** | 프로젝트의 브랜드별 최신 수집 상태(정상/부분 수집/실패)를 헤더 근처에서 바로 보여줌 |
 | **비주얼 분석** | **Vision AI Tagging** | Gemini Vision API를 이용해 이미지 내 인물 포함 여부, 텍스트 중심 여부, 제품 중심 여부 자동 태깅. 신규 소재는 수집 즉시 1차 분석하고, quota/일시 오류로 `PENDING`으로 남은 소재는 Daily Scheduler 마지막 단계(`process_pending_analysis`)가 별도로 재시도한다 — Gemini 실패는 Core Collection의 성공 여부와 완전히 독립적이다. `SUCCESS`로 확정된 소재는 다시 분석하지 않는다. |
-| **대시보드** | **Fact Metrics & 갤러리** | 신규/종료/유지 개수 카드, 비주얼 포맷 비율 차트, 카드형 라이브 광고 갤러리(생존기간 순 정렬) 제공. 갤러리에는 Brand 외에 Status/Format/Visual/카피 검색 필터가 있고, 카드를 클릭하면 Ad Detail Drawer(집행/추적 일수, 변화 이력, Meta 원본 링크 등)가 열린다. |
+| **캠페인 분류** | **Campaign Tag 자동 분류** (2026-09) | 프로젝트마다 사용자가 직접 정의하는 캠페인 태그(이름+정의)를 관리하고, Gemini가 신규 소재의 대표 이미지+카피+CTA를 태그 정의와 대조해 자동 분류한다. 확신이 낮으면 억지로 분류하지 않고 "검토 필요"로 남기며, 사용자가 수동 지정한 값은 항상 AI 값보다 우선한다. 상세 규칙: `docs/DATA_SEMANTICS.md` §9. |
+| **미디어 개선** | **VIDEO/CAROUSEL 판별 고도화** (2026-09) | 기존에는 `videos[0]`/`cards[0]` 1개만 보고 `video_hd_url`/카드 내부 영상을 읽지 않았다. 검증된 참고 구현(`reference/marketing-os-course`)을 이식해 videos 전체 순회, HD 우선(SD fallback), 카드 내부 영상까지 처리한다 — 단, 카드 안에 영상이 섞여 있어도 포맷은 항상 `CAROUSEL`로 유지된다(`docs/DATA_SEMANTICS.md` §10). VIDEO 소재는 수집과 완전히 분리된 별도 배치가 대표 keyframe(최대 4장)을 캐싱해 Ad Detail Drawer에서 보여준다. |
+| **대시보드** | **Fact Metrics & 갤러리** | 신규/종료/유지 개수 카드, 비주얼 포맷 비율 차트, 카드형 라이브 광고 갤러리(생존기간 순 정렬) 제공. 갤러리에는 Brand 외에 Status/Format/Visual/캠페인 태그/카피 검색 필터가 있고, 카드를 클릭하면 Ad Detail Drawer(집행/추적 일수, 변화 이력, 캠페인 태그, VIDEO keyframe/CAROUSEL 카드 구성, Meta 원본 링크 등)가 열린다. 메인 대시보드 정보 구조는 비주얼 패턴 → 기간별 변화 → 캠페인 구성 비중 → 라이브 갤러리 → 브랜드 관리 순으로, 광고주 보고·경쟁사 분석에 맞춘 분석 중심 화면이다. |
 | **알림** | **Teams Webhook Alert** | 수집 완료 후 Microsoft Teams 채널로 당일 신규(STARTED 기준)/종료 소재 수치 및 최고 장수 소재 요약 알림 전송 |
 | **온보딩/안내** | **Pixel Assistant Guide** | 우측 하단 상주 도트 비서 캐릭터("캐쳐")가 의미 있는 순간(온보딩/Baseline 완료/신규 변화/수집 완료·실패)에만 말풍선을 열어 안내 |
 

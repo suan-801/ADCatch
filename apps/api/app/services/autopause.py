@@ -14,14 +14,30 @@ from app.config import settings
 from app.models import Project, User
 
 
-def touch_last_accessed(db: Session, user_id) -> None:
-    user = db.get(User, user_id)
-    if user is None:
+def _needs_touch(last_accessed_at: datetime, now: datetime, threshold_seconds: int) -> bool:
+    # SQLite(테스트)는 DateTime(timezone=True) 컬럼도 naive datetime으로 돌려주므로 항상 UTC로 보정.
+    last = last_accessed_at if last_accessed_at.tzinfo is not None else last_accessed_at.replace(tzinfo=timezone.utc)
+    return (now - last).total_seconds() >= threshold_seconds
+
+
+def touch_last_accessed(db: Session, user: User) -> None:
+    """§13-3 성능 최적화 — 이전에는 이 함수가 요청마다(사실상 거의 모든 API 호출마다) DB
+    write(SELECT+UPDATE+COMMIT)를 실행했다. last_accessed_touch_throttle_seconds 이내에 이미
+    갱신됐다면 아무 것도 하지 않고 즉시 반환한다.
+
+    14일 자동 정지 판정(should_collect_project)은 일 단위 스케줄러에서만 평가되므로, 이 정도의
+    지연은 정책 의미에 영향이 없다 — PAUSED→ACTIVE 복구도 동일한 throttle 창 안에서 이뤄지는
+    것으로 허용한다. get_current_user()가 이미 조회해둔 User 객체를 그대로 받아 재조회를 피한다."""
+    now = datetime.now(timezone.utc)
+    if user.last_accessed_at is not None and not _needs_touch(
+        user.last_accessed_at, now, settings.last_accessed_touch_throttle_seconds
+    ):
         return
-    user.last_accessed_at = datetime.now(timezone.utc)
+
+    user.last_accessed_at = now
 
     # 접속 즉시 해당 유저의 PAUSED 프로젝트를 ACTIVE로 복구 (PRD 3.2)
-    projects = db.scalars(select(Project).where(Project.user_id == user_id, Project.status == "PAUSED")).all()
+    projects = db.scalars(select(Project).where(Project.user_id == user.id, Project.status == "PAUSED")).all()
     for project in projects:
         project.status = "ACTIVE"
 

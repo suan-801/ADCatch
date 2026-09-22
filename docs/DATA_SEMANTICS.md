@@ -144,3 +144,111 @@ N일"(ADCatcher가 처음 관측한 시점 기준) — 둘을 같은 개념처�
   (`app.services.pending_analysis.process_pending_analysis`)가 담당하며, Daily
   Scheduler(`scripts/run_daily_collection.py`)가 매 회차 마지막 단계에서 호출한다. 이 배치가
   실패해도 그 회차의 Core Collection 결과(이미 commit됨)는 되돌리지 않는다.
+
+## 9. Campaign Tag 자동 분류 (2026-09)
+
+프로젝트마다 사용자가 직접 정의하는 캠페인 분류 태그(`campaign_tags` 테이블)와, `Ad`에 저장되는
+현재 분류 상태로 구성된다. 시스템에 고정된 캠페인 카테고리는 없다 — 태그명/정의는 전적으로
+사용자가 관리한다.
+
+**`Ad.campaign_tag_assignment_source`("누가 지정했는가")와
+`Ad.campaign_classification_status`("상태")는 서로 다른 축이다** — `NEEDS_REVIEW`는 상태이지
+지정 주체가 아니므로 source enum에 섞지 않는다.
+
+| `assignment_source` | 의미 |
+|---|---|
+| `NULL` | 아직 아무도 지정하지 않음(초기 상태, 또는 재분류로 리셋된 직후) |
+| `AI` | Gemini가 분류를 시도함(성공이든 NEEDS_REVIEW든) |
+| `USER` | 사용자가 Drawer에서 직접 지정/수정함 — 항상 AI 값보다 우선하며, 이후 자동 재분류
+  배치가 절대 덮어쓰지 않는다(§`reclassify` 참고) |
+
+| `classification_status` | 의미 |
+|---|---|
+| `PENDING` | 아직 분류 시도가 없거나(신규), 재분류로 리셋된 직후, 또는 다운로드/파싱 실패로
+  재시도 대기 중 |
+| `SUCCESS` | `campaign_tag_id`가 확정됨(confidence가 임계값 이상) |
+| `NEEDS_REVIEW` | Gemini가 응답은 했지만 확신이 낮거나(`campaign_tag_confidence_threshold`
+  미달) 태그를 확정하지 못함 — `campaign_tag_id`는 NULL, confidence/reason은 디버깅/화면 표시용으로
+  유지 |
+| `FAILED` | `campaign_classification_max_retries`(기본 3회)만큼 재시도했지만 계속 실패(이미지
+  다운로드/응답 파싱 실패 등) — 더 이상 자동 재시도하지 않는다 |
+
+**사용자가 태그를 수동 지정하면 `campaign_tag_confidence`/`campaign_tag_reason`을 항상 `NULL`로
+클리어한다** — "사용자 지정 굿즈 / AI 신뢰도 87%" 같은 모순된 화면을 방지하기 위함.
+
+**Gemini는 프로젝트의 활성(`is_active=true`) 태그 중에서만 선택할 수 있다.** 프롬프트에 각 태그의
+`id`/`name`/`definition`을 그대로 넣고, 응답의 `campaign_tag_id`가 그 목록에 없으면(임의로
+지어낸 값이거나 이미 비활성화된 태그) 서버가 무조건 버리고 `NEEDS_REVIEW`로 강등한다. 다른
+프로젝트의 태그 id가 섞여 들어올 수는 없다(애초에 해당 프로젝트의 태그만 프롬프트에 실림).
+
+**Core Collection과의 격리(P0-07과 동일한 원칙)**: 신규 소재의 캠페인 분류는 비주얼 분석과
+완전히 독립된 별도 try/except로 실행된다 — 하나가 실패해도 다른 하나에 영향을 주지 않고, 둘 다
+실패해도 `Ad` row 생성 자체는 항상 성공한다. 재시도는 별도 배치
+(`app.services.pending_campaign_classification.process_pending_campaign_classification`)가
+담당하며, `campaign_classification_status == 'PENDING'`인 소재만 조회한다 — **assignment_source는
+전혀 확인하지 않는다.** `USER` 소재는 `classification_status`가 이미 `SUCCESS`로 고정돼 있어
+이 쿼리 대상에서 자연히 제외된다.
+
+**재분류(`POST /projects/{project_id}/campaign-tags/reclassify`)**: 태그 정의가 바뀌거나 새
+태그가 추가됐을 때, 기존 소재를 새 기준으로 다시 분류하고 싶을 수 있다. 이 엔드포인트는 실제
+Gemini 호출을 하지 않고, 대상 `Ad`의 `campaign_tag_id`/`assignment_source`/`confidence`/
+`reason`/`retry_count`를 전부 초기화해 `classification_status=PENDING`으로 되돌리기만 한다 —
+이후 pending 배치가 처리한다(대량 Gemini 호출이 이 요청 자체를 느리게 만들거나 core collection을
+막으면 안 되므로). 기본값(`include_user_assigned=false`)에서는 `USER` 소스 소재가 쿼리에서부터
+제외되어 절대 건드리지 않는다. `include_user_assigned=true`를 명시적으로 선택한 경우에만 `USER`
+소재도 리셋 대상에 포함된다.
+
+**중요 — 과거 기간 집계에 미치는 영향**: `campaign_tag_id`는 `Ad`에 저장되는 "현재 분류"다.
+스냅샷이 아니므로, 소재를 재분류하면 그 소재가 걸린 과거 주차의 Campaign Mix 집계도 함께
+바뀐다(새 분류 기준으로 재계산). 이는 의도된 동작이다 — "태그 체계를 고치면 기존 광고도 새 기준으로
+재분류"와 일관되게 유지하기 위함. 특정 시점 보고서 숫자를 고정 보존해야 하는 요구가 생기면, 그때
+별도의 `AdCampaignTagAssignmentHistory` 테이블(assignment 변경 이력) 도입을 검토한다 — 현재는
+범위 밖이다.
+
+## 10. VIDEO/CAROUSEL 미디어 메타데이터 (2026-09)
+
+`Ad.image_url`은 포맷과 무관하게 계속 "대표 썸네일 1장"으로 쓰인다(기존 갤러리 동작 불변).
+아래 필드들은 원본 미디어 구조를 additive로 보존해 VIDEO/CAROUSEL 상세 UI에 쓴다.
+
+- `video_url`: **VIDEO 포맷 전용**(HD 우선, SD fallback). CAROUSEL/IMAGE는 항상 NULL — 카드
+  내부에 영상이 섞여 있어도(아래 참고) 최상위 `video_url`에는 반영하지 않는다.
+- `media_items`(JSON 배열, `[{type: "image"|"video", url, preview_url}]`): 원본 videos/cards/
+  images 구조를 그대로 보존한다.
+- `keyframe_urls`/`keyframe_status`/`keyframe_retry_count`/`keyframe_error`: VIDEO 소재의
+  캐싱된 keyframe(최대 4장) — `analysis_status`(Gemini Vision)와 동일한 PENDING→SUCCESS/FAILED
+  lifecycle을 따르되, **Core Collection의 동기 enrichment 경로에서는 절대 생성되지 않는다.**
+  신규 VIDEO 소재는 생성 시 `keyframe_status=PENDING`만 세팅되고, 실제 추출(영상 다운로드+
+  ffprobe+ffmpeg+Storage 업로드)은 완전히 분리된 별도 배치
+  (`app.services.pending_video_keyframes.process_pending_video_keyframes`)가 담당한다 — 무거운
+  작업을 이미 여러 소재를 동시 처리하는 동기 enrichment 경로에 추가해 수집 자체를 느리게 만들지
+  않기 위함이다.
+
+**format 판별 규칙(카드 내부 영상이 있어도 절대 바뀌지 않음)**: `snapshot.videos`가 있으면
+`VIDEO`, 없고 `snapshot.cards`가 있으면 **카드 중 일부/전부가 영상이어도 항상 `CAROUSEL`**,
+그것도 없고 `snapshot.images`가 있으면 `IMAGE`. "카드 내부 영상"은 오직 `media_items`의 개별
+항목 `type`에만 반영되며, CAROUSEL을 VIDEO로 승격시키지 않는다.
+
+**기존(이 필드들이 생기기 전) VIDEO 소재의 backfill**: 별도 백필 스크립트를 두지 않는다. 다음
+수집에서 그 소재가 다시 발견될 때(`ad_sync.synchronize_ad_status`의 기존 소재 재발견 분기),
+`video_url`/`media_items`가 비어 있으면 채우고, VIDEO 포맷이고 `video_url`이 새로 확보됐으며
+`keyframe_status`가 아직 `NOT_APPLICABLE`이면 `PENDING`으로 전환해 pending 배치 대상이 되게
+한다. 이미 캐싱된 값은 절대 덮어쓰지 않는다.
+
+## 11. 기간(주간) 조회 API의 `NO_RECORD` 해석 원칙 (2026-09)
+
+`GET /projects/{project_id}/ad-changes/range`는 단일 날짜 API(`GET .../ad-changes`)와 달리
+`collection_status`(단일 SUCCESS/PARTIAL/FAILED/NO_RECORD 값)를 반환하지 않는다. (경쟁사×날짜)
+그리드를 채워 하나의 값으로 뭉개면, "자동수집을 켜지 않은 날"의 기록 없음이 "실패"처럼 보이는
+위험이 있기 때문이다.
+
+대신 `collection_run_summary`(범위 내 **실제 시도된** `CollectionRun`만 status별로 집계 — 시도
+자체가 없던 날짜는 포함되지 않는다)와 `dates_with_collection`(실제 수집 시도가 있었던 날짜 목록)을
+반환한다. 프론트는 이 값을 기존 `CollectionFreshness`(`GET .../dashboard/freshness`)와 함께
+보여줘 데이터 신뢰도를 판단한다 — "시도 안 함"과 "시도했지만 실패"를 항상 구분해서 표시한다.
+
+`visual_pattern`/`campaign_mix`는 이 범위 API에서 **unique 광고 기준**으로 집계한다(동일 광고가
+기간 내 STARTED와 REACTIVATED를 모두 가져도 1회만 카운트). 반면 `started_ads`/`reactivated_ads`/
+`stopped_ads`(변화 목록)는 기존과 동일하게 **이벤트 기준**으로 dedupe 없이 나열한다 — 동일 광고가
+기간 안에서 여러 이벤트를 가진 경우 event history 의미를 보존하기 위함이다. (단일 날짜
+`get_ad_changes()`의 `visual_pattern`은 이벤트 기준 그대로 유지 — 하루 안에서는 사실상 항상
+동일한 결과이므로 건드리지 않았다.)

@@ -2,13 +2,13 @@ import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.deps import get_current_user, require_admin
-from app.models import AdObservation, AdStatusEvent, CollectionRun, Project, User
-from app.schemas import ProjectCreate, ProjectOut, ProjectUpdate
+from app.models import Ad, AdObservation, AdStatusEvent, CollectionRun, Competitor, Project, User
+from app.schemas import ProjectCreate, ProjectOut, ProjectSummaryOut, ProjectUpdate
 from app.services import storage
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -35,6 +35,53 @@ def list_projects(
     user: User = Depends(get_current_user),
 ):
     return db.scalars(select(Project).where(Project.user_id == user.id)).all()
+
+
+@router.get("/summary", response_model=list[ProjectSummaryOut])
+def list_projects_summary(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """§13-2 성능 최적화 — 랜딩 페이지의 listProjects()+N×(listCompetitors+getDashboard) 조합을
+    이 엔드포인트 1회 호출로 대체한다. 값의 의미는 기존 조합과 동일하다(브랜드 수 / 활성 광고 수).
+    경로 등록 순서 주의: "/summary"는 "/{project_id}"보다 먼저 등록해야 project_id로 오해되지 않는다."""
+    projects = db.scalars(select(Project).where(Project.user_id == user.id)).all()
+    if not projects:
+        return []
+    project_ids = [p.id for p in projects]
+
+    competitor_counts = dict(
+        db.execute(
+            select(Competitor.project_id, func.count())
+            .where(Competitor.project_id.in_(project_ids))
+            .group_by(Competitor.project_id)
+        ).all()
+    )
+    active_ad_counts = dict(
+        db.execute(
+            select(Competitor.project_id, func.count())
+            .join(Ad, Ad.competitor_id == Competitor.id)
+            .where(
+                Competitor.project_id.in_(project_ids),
+                Ad.status == "ACTIVE",
+                Ad.is_archived.is_(False),
+            )
+            .group_by(Competitor.project_id)
+        ).all()
+    )
+
+    return [
+        ProjectSummaryOut(
+            id=p.id,
+            name=p.name,
+            status=p.status,
+            auto_collect_enabled=p.auto_collect_enabled,
+            created_at=p.created_at,
+            competitor_count=competitor_counts.get(p.id, 0),
+            active_ad_count=active_ad_counts.get(p.id, 0),
+        )
+        for p in projects
+    ]
 
 
 @router.get("/{project_id}", response_model=ProjectOut)

@@ -49,9 +49,11 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Ad, Competitor, CollectionRun
-from app.schemas import AdChangeEventType, AdStatus, RawAdItem, SyncResult, VisualType
-from app.services import collection_history, media
+from app.schemas import AdChangeEventType, AdFormat, AdStatus, CampaignTagOut, RawAdItem, SyncResult, VisualType
+from app.services import campaign_tagging, collection_history, media
+from app.services.campaign_tags import list_active_campaign_tags
 from app.services.timing import stage_timer
+from app.services.vision_tagging import GeminiQuotaExceeded
 
 
 def _survival_days_at(source_started_at: datetime | None, first_seen_at: datetime, at: datetime) -> int:
@@ -65,30 +67,107 @@ def _survival_days_at(source_started_at: datetime | None, first_seen_at: datetim
 
 
 class _Enrichment:
-    __slots__ = ("image_url", "visual_type", "analysis_status", "analysis_error")
+    __slots__ = (
+        "image_url",
+        "visual_type",
+        "analysis_status",
+        "analysis_error",
+        # Campaign Tag 자동 분류 (additive, 2026-09) — 비주얼 분석과 완전히 독립된 결과.
+        "campaign_tag_id",
+        "campaign_tag_confidence",
+        "campaign_tag_reason",
+        "campaign_tag_assignment_source",
+        "campaign_classification_status",
+        "campaign_classification_error",
+    )
 
-    def __init__(self, image_url: str | None, visual_type: VisualType | None, analysis_status: str, analysis_error: str | None):
+    def __init__(
+        self,
+        image_url: str | None,
+        visual_type: VisualType | None,
+        analysis_status: str,
+        analysis_error: str | None,
+        campaign_tag_id: str | None = None,
+        campaign_tag_confidence: float | None = None,
+        campaign_tag_reason: str | None = None,
+        campaign_tag_assignment_source: str | None = None,
+        campaign_classification_status: str = "PENDING",
+        campaign_classification_error: str | None = None,
+    ):
         self.image_url = image_url
         self.visual_type = visual_type
         self.analysis_status = analysis_status
         self.analysis_error = analysis_error
+        self.campaign_tag_id = campaign_tag_id
+        self.campaign_tag_confidence = campaign_tag_confidence
+        self.campaign_tag_reason = campaign_tag_reason
+        self.campaign_tag_assignment_source = campaign_tag_assignment_source
+        self.campaign_classification_status = campaign_classification_status
+        self.campaign_classification_error = campaign_classification_error
 
 
-def _enrich_one(competitor_id: uuid.UUID, ad_archive_id: str, image_url: str) -> _Enrichment:
+def _classify_campaign_tag_isolated(
+    image_url: str | None, copy_text: str | None, cta_text: str | None, active_tags: list[CampaignTagOut]
+) -> tuple[str | None, float | None, str | None, str, str | None]:
+    """(campaign_tag_id, confidence, reason, classification_status, classification_error)를 반환한다.
+    비주얼 분석과 완전히 독립된 별도 try/except로 격리한다 — 하나가 실패해도 다른 하나에 영향 없음
+    (P0-07과 동일한 enrichment 격리 원칙을 캠페인 분류에도 그대로 적용)."""
+    if not active_tags:
+        return None, None, None, "PENDING", None
+    try:
+        tag_id, confidence, reason = campaign_tagging.classify_campaign_tag(image_url, copy_text, cta_text, active_tags)
+    except GeminiQuotaExceeded as e:
+        return None, None, None, "PENDING", str(e)[:500]
+    except Exception as e:  # noqa: BLE001 - 의도적으로 광범위하게 격리
+        return None, None, None, "PENDING", str(e)[:500]
+
+    if tag_id is None and confidence is None and reason is None:
+        # 완전한 실패(이미지 다운로드/Gemini 응답 파싱) — PENDING 유지, 이후 pending 배치가 재시도.
+        return None, None, None, "PENDING", "신규 소재 분류 중 이미지 다운로드 또는 Gemini 응답 파싱 실패"
+    if tag_id is not None and confidence is not None and confidence >= settings.campaign_tag_confidence_threshold:
+        return tag_id, confidence, reason, "SUCCESS", None
+    # Gemini는 응답했지만 확신이 낮거나 태그를 확정하지 못함 — 억지 분류 대신 검토 필요로 남긴다.
+    return None, confidence, reason, "NEEDS_REVIEW", None
+
+
+def _enrich_one(competitor_id: uuid.UUID, item: RawAdItem, active_tags: list[CampaignTagOut]) -> _Enrichment:
     # P0-07: enrichment(캐싱+Gemini)는 core data(수집)와 완전히 분리한다 — 어떤 예외가 나든
     # 이 함수는 예외를 밖으로 던지지 않고 FAILED로 기록만 남긴다(광고 row 생성은 항상 계속돼야 함).
     try:
-        cached_url, visual_type = media.process_ad_image(competitor_id, ad_archive_id, image_url)
-        return _Enrichment(cached_url, visual_type, "SUCCESS" if visual_type else "PENDING", None)
+        cached_url, visual_type = media.process_ad_image(competitor_id, item.ad_archive_id, item.image_url)
+        analysis_status = "SUCCESS" if visual_type else "PENDING"
+        analysis_error = None
     except Exception as e:  # noqa: BLE001 - 의도적으로 광범위하게 격리
-        return _Enrichment(image_url, None, "FAILED", str(e)[:500])
+        cached_url, visual_type = item.image_url, None
+        analysis_status = "FAILED"
+        analysis_error = str(e)[:500]
+
+    campaign_tag_id, campaign_confidence, campaign_reason, campaign_status, campaign_error = (
+        _classify_campaign_tag_isolated(cached_url or item.image_url, item.copy_text, item.cta_text, active_tags)
+    )
+    campaign_source = "AI" if campaign_status in ("SUCCESS", "NEEDS_REVIEW") else None
+
+    return _Enrichment(
+        image_url=cached_url,
+        visual_type=visual_type,
+        analysis_status=analysis_status,
+        analysis_error=analysis_error,
+        campaign_tag_id=campaign_tag_id,
+        campaign_tag_confidence=campaign_confidence,
+        campaign_tag_reason=campaign_reason,
+        campaign_tag_assignment_source=campaign_source,
+        campaign_classification_status=campaign_status,
+        campaign_classification_error=campaign_error,
+    )
 
 
 def _enrich_new_ads_concurrently(
-    competitor_id: uuid.UUID, new_items: list[RawAdItem]
+    competitor_id: uuid.UUID, new_items: list[RawAdItem], active_tags: list[CampaignTagOut]
 ) -> dict[str, _Enrichment]:
     """신규 소재 중 image_url이 있는 것들의 enrichment를 동시에 실행해 결과를 모아 돌려준다.
-    네트워크 I/O 대기 중 GIL이 풀리는 순수 blocking I/O(httpx)이므로 스레드풀로 충분하다."""
+    네트워크 I/O 대기 중 GIL이 풀리는 순수 blocking I/O(httpx)이므로 스레드풀로 충분하다.
+    active_tags는 호출 전 메인 스레드에서 1회 조회한 읽기 전용 목록을 그대로 공유한다(DB 세션은
+    스레드 안에서 쓰지 않는다는 기존 제약과 동일한 이유)."""
     targets = [item for item in new_items if item.image_url]
     if not targets:
         return {}
@@ -96,8 +175,7 @@ def _enrich_new_ads_concurrently(
     max_workers = min(settings.media_enrichment_concurrency, len(targets))
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(_enrich_one, competitor_id, item.ad_archive_id, item.image_url): item.ad_archive_id
-            for item in targets
+            pool.submit(_enrich_one, competitor_id, item, active_tags): item.ad_archive_id for item in targets
         }
         for future in as_completed(futures):
             results[futures[future]] = future.result()
@@ -136,8 +214,14 @@ def synchronize_ad_status(
     enrichment_results: dict[str, _Enrichment] = {}
     if tag_visual:
         new_items = [item for aid, item in fetched_by_archive_id.items() if aid not in existing_by_archive_id]
+        # 활성 캠페인 태그는 메인 스레드에서 1회만 조회해 스레드풀에 읽기 전용으로 공유한다.
+        active_campaign_tags = (
+            [CampaignTagOut.model_validate(t) for t in list_active_campaign_tags(db, competitor.project_id)]
+            if competitor is not None
+            else []
+        )
         with stage_timer("enrichment_concurrent_total", competitor_id=competitor_id, new_count=len(new_items)):
-            enrichment_results = _enrich_new_ads_concurrently(competitor_id, new_items)
+            enrichment_results = _enrich_new_ads_concurrently(competitor_id, new_items, active_campaign_tags)
 
     new_count = 0
     kept_active_count = 0
@@ -157,6 +241,13 @@ def synchronize_ad_status(
                 analysis_status = enrichment.analysis_status
                 analysis_error = enrichment.analysis_error
                 analyzed_at = now
+                campaign_tag_id = enrichment.campaign_tag_id
+                campaign_tag_confidence = enrichment.campaign_tag_confidence
+                campaign_tag_reason = enrichment.campaign_tag_reason
+                campaign_tag_assignment_source = enrichment.campaign_tag_assignment_source
+                campaign_classification_status = enrichment.campaign_classification_status
+                campaign_classification_error = enrichment.campaign_classification_error
+                campaign_tag_classified_at = now if campaign_tag_assignment_source else None
             else:
                 # tag_visual=False였거나 image_url이 애초에 없던 경우 — enrichment 자체를 하지 않는다.
                 image_url = item.image_url
@@ -164,11 +255,23 @@ def synchronize_ad_status(
                 analysis_status = "PENDING"
                 analysis_error = None
                 analyzed_at = None
+                campaign_tag_id = None
+                campaign_tag_confidence = None
+                campaign_tag_reason = None
+                campaign_tag_assignment_source = None
+                campaign_classification_status = "PENDING"
+                campaign_classification_error = None
+                campaign_tag_classified_at = None
 
             new_ad_id = uuid.uuid4()
             # P0-09: baseline(pending) 중에 발견된 소재는 "오늘 켠 광고"가 아니라 "처음 확인한
             # 현재 집행 소재"이므로 NEW가 아니라 ACTIVE로 생성한다(Gallery NEW 배지 방지).
             initial_status = AdStatus.ACTIVE.value if is_baseline_pending else AdStatus.NEW.value
+            # VIDEO/CAROUSEL 미디어 — keyframe 추출은 여기서 절대 하지 않는다(§8, 별도 pending
+            # 배치가 처리). VIDEO이고 video_url이 있으면 PENDING으로만 표시해둔다.
+            keyframe_status = (
+                "PENDING" if item.format.value == "VIDEO" and item.video_url else "NOT_APPLICABLE"
+            )
             db.add(
                 Ad(
                     id=new_ad_id,
@@ -187,6 +290,16 @@ def synchronize_ad_status(
                     analysis_status=analysis_status,
                     analysis_error=analysis_error,
                     analyzed_at=analyzed_at,
+                    campaign_tag_id=uuid.UUID(campaign_tag_id) if campaign_tag_id else None,
+                    campaign_tag_confidence=campaign_tag_confidence,
+                    campaign_tag_reason=campaign_tag_reason,
+                    campaign_tag_assignment_source=campaign_tag_assignment_source,
+                    campaign_tag_classified_at=campaign_tag_classified_at,
+                    campaign_classification_status=campaign_classification_status,
+                    campaign_classification_error=campaign_classification_error,
+                    video_url=item.video_url,
+                    media_items=[m.model_dump() for m in item.media_items] if item.media_items else None,
+                    keyframe_status=keyframe_status,
                 )
             )
             new_count += 1
@@ -218,6 +331,16 @@ def synchronize_ad_status(
             existing.consecutive_inactive_days = 0
             existing.is_archived = False  # P0-04: 재등장한 아카이빙 광고 복원 (신규 row 생성 안 함)
             kept_active_count += 1
+
+            # VIDEO/CAROUSEL 미디어 backfill — 이 컬럼들이 생기기 전에 수집된 기존 소재가 재발견될
+            # 때마다 빈 필드만 채운다(이미 캐싱된 값은 절대 덮어쓰지 않는다). 별도 백필 스크립트 없이
+            # 다음 수집 사이클에서 자연스럽게 채워지게 한다.
+            if existing.video_url is None and item.video_url:
+                existing.video_url = item.video_url
+            if not existing.media_items and item.media_items:
+                existing.media_items = [m.model_dump() for m in item.media_items]
+            if existing.format == AdFormat.VIDEO.value and existing.video_url and existing.keyframe_status == "NOT_APPLICABLE":
+                existing.keyframe_status = "PENDING"
             # INACTIVE(아카이빙된 광고 포함, is_archived=True는 항상 status=INACTIVE를 동반함)였던
             # 광고가 다시 발견된 경우에만 REACTIVATED. 계속 노출 중이던 광고는 새 이벤트 없음.
             # P0-07/P0-08: baseline이 아직 pending인 동안은 이벤트를 만들지 않는다(위 새 소재 분기와 동일 원칙).

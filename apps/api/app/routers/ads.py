@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,8 +9,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.deps import get_current_user, require_admin
-from app.models import Ad, Competitor, User
-from app.schemas import AdHistoryResponse, AdOut, SyncResult
+from app.models import Ad, CampaignTag, Competitor, Project, User
+from app.schemas import AdCampaignTagUpdate, AdHistoryResponse, AdOut, AdWithCompetitorOut, SyncResult
 from app.services import collection_history
 from app.services.ad_library_collector import ApifyRunError, fetch_live_ads
 from app.services.ad_sync import synchronize_ad_status
@@ -18,6 +19,9 @@ router = APIRouter(prefix="/competitors/{competitor_id}/ads", tags=["ads"])
 # Part C-03: 개별 광고 조회는 competitor_id 없이 ad_id만으로 이뤄지므로 별도 prefix를 쓴다.
 # 기존 /competitors/{competitor_id}/ads 계약은 변경하지 않는다.
 ad_detail_router = APIRouter(prefix="/ads", tags=["ads"])
+# §13-1 성능 최적화: 프로젝트 전체 Ad를 1회 호출로 반환한다(브랜드별 listAds() N회 호출 대체용).
+# 기존 GET /competitors/{competitor_id}/ads는 그대로 유지 — 이 라우터는 순수 추가다.
+project_ads_router = APIRouter(prefix="/projects/{project_id}/ads", tags=["ads"])
 
 
 def _get_owned_competitor(db: Session, competitor_id: uuid.UUID, user: User) -> Competitor:
@@ -89,3 +93,63 @@ def get_ad_history(
     if ad is None or ad.competitor.project.user_id != user.id:
         raise HTTPException(status_code=404, detail="Ad not found")
     return AdHistoryResponse(ad_id=ad_id, events=collection_history.get_ad_history(db, ad_id))
+
+
+@ad_detail_router.patch("/{ad_id}/campaign-tag", response_model=AdOut)
+def update_ad_campaign_tag(
+    ad_id: uuid.UUID,
+    payload: AdCampaignTagUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+    _admin: bool = Depends(require_admin),
+):
+    """사용자가 직접 캠페인 태그를 지정/수정한다 — AI 값보다 항상 우선한다.
+
+    FK만으로는 "다른 프로젝트의 태그를 지정"하는 것을 막지 못하므로, ad가 속한 프로젝트와 태그가
+    속한 프로젝트가 같은지 서버에서 반드시 재검증한다. 비활성화된 태그도 지정할 수 없다."""
+    ad = db.get(Ad, ad_id)
+    if ad is None or ad.competitor.project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Ad not found")
+
+    tag = db.get(CampaignTag, payload.campaign_tag_id)
+    if tag is None or not tag.is_active or tag.project_id != ad.competitor.project_id:
+        raise HTTPException(status_code=400, detail="Invalid or inactive campaign tag for this project")
+
+    ad.campaign_tag_id = tag.id
+    ad.campaign_tag_assignment_source = "USER"
+    ad.campaign_classification_status = "SUCCESS"
+    # 사용자가 직접 지정하면 이전 AI confidence/reason은 의미가 없어지므로 항상 비운다 —
+    # "사용자 지정 / AI 신뢰도 87%" 같은 모순된 화면을 방지한다.
+    ad.campaign_tag_confidence = None
+    ad.campaign_tag_reason = None
+    ad.campaign_tag_classified_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(ad)
+    return ad
+
+
+@project_ads_router.get("", response_model=list[AdWithCompetitorOut])
+def list_project_ads(
+    project_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """§13-1 성능 최적화 — 대시보드가 브랜드마다 listAds()를 N회 호출하던 것을 1회로 통합한다.
+    값의 의미는 기존 조합(경쟁사별 조회 후 클라이언트에서 합치기)과 동일하다."""
+    project = db.get(Project, project_id)
+    if project is None or project.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    rows = db.execute(
+        select(Ad, Competitor.name)
+        .join(Competitor, Ad.competitor_id == Competitor.id)
+        .where(Competitor.project_id == project_id, Ad.is_archived.is_(False))
+        .order_by(Ad.first_seen_at.asc())
+    ).all()
+
+    result: list[AdWithCompetitorOut] = []
+    for ad, competitor_name in rows:
+        data = AdOut.model_validate(ad).model_dump()
+        data["competitor_name"] = competitor_name
+        result.append(AdWithCompetitorOut(**data))
+    return result

@@ -36,6 +36,25 @@ class Settings(BaseSettings):
     auto_pause_days: int = 14
     archive_after_inactive_days: int = 14
 
+    # ── Campaign Tag 자동 분류 (2026-09) ─────────────────────────────────
+    # 이 값보다 confidence가 낮으면 자동 확정하지 않고 NEEDS_REVIEW로 남긴다.
+    campaign_tag_confidence_threshold: float = 0.6
+    campaign_classification_pending_batch_size: int = 20
+    campaign_classification_max_retries: int = 3
+
+    # ── VIDEO Keyframe 캐싱 (2026-09) ────────────────────────────────────
+    # 신규 수집 동기 경로에서는 절대 실행하지 않는다 — 별도 pending 배치(process_pending_video_keyframes)
+    # 에서만 실행해 Core Collection 응답 시간에 영향을 주지 않는다.
+    ffmpeg_path: str = "ffmpeg"
+    video_keyframe_count: int = 4
+    video_keyframe_max_download_seconds: int = 30
+    video_keyframe_pending_batch_size: int = 20
+    video_keyframe_max_retries: int = 3
+
+    # last_accessed_at 갱신은 요청마다 DB write를 하지 않고 이 초(秒) 단위로만 반영한다(성능 최적화).
+    # 14일 자동 정지 판정은 일 단위 스케줄러에서만 평가되므로 이 정도 지연은 정책 의미에 영향 없다.
+    last_accessed_touch_throttle_seconds: int = 300
+
     # 콤마로 구분된 허용 프론트엔드 origin 목록 (P0-11). 운영 배포 시 .env에서
     # CORS_ALLOWED_ORIGINS=https://app.adcatcher.com,https://staging.adcatcher.com 형태로 지정.
     cors_allowed_origins: str = "http://localhost:3000"

@@ -23,7 +23,7 @@ def get_current_user(db: Session = Depends(get_db)) -> User:
         db.commit()
         db.refresh(user)
 
-    touch_last_accessed(db, user.id)
+    touch_last_accessed(db, user)
     return user
 
 

@@ -1,11 +1,14 @@
 import type {
   Ad,
+  AdChangesRangeResponse,
   AdChangesResponse,
   AdHistoryResponse,
+  CampaignTag,
   Competitor,
   CollectionFreshness,
   DashboardMetrics,
   Project,
+  ProjectSummary,
   SyncResult,
 } from "./types";
 
@@ -42,6 +45,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const api = {
   listProjects: () => request<Project[]>("/projects"),
+  // §13-2 성능 최적화 — 랜딩 페이지 카드용, listProjects+N×(listCompetitors+getDashboard) 대체.
+  listProjectsSummary: () => request<ProjectSummary[]>("/projects/summary"),
   createProject: (name: string) =>
     request<Project>("/projects", { method: "POST", body: JSON.stringify({ name }) }),
   updateProject: (projectId: string, payload: { auto_collect_enabled?: boolean }) =>
@@ -73,15 +78,52 @@ export const api = {
     request<CollectionFreshness>(`/projects/${projectId}/dashboard/freshness`),
 
   listAds: (competitorId: string) => request<Ad[]>(`/competitors/${competitorId}/ads`),
+  // §13-1 성능 최적화 — 브랜드별 listAds() N회 호출 대신 프로젝트 전체를 1회로 조회한다.
+  // 기존 listAds(competitorId)는 삭제하지 않고 그대로 유지한다.
+  listProjectAds: (projectId: string) =>
+    request<(Ad & { competitor_name: string })[]>(`/projects/${projectId}/ads`),
   collectNow: (competitorId: string) =>
     request<SyncResult>(`/competitors/${competitorId}/ads/collect`, { method: "POST" }),
   getAdHistory: (adId: string) => request<AdHistoryResponse>(`/ads/${adId}/history`),
+  updateAdCampaignTag: (adId: string, campaignTagId: string) =>
+    request<Ad>(`/ads/${adId}/campaign-tag`, {
+      method: "PATCH",
+      body: JSON.stringify({ campaign_tag_id: campaignTagId }),
+    }),
 
   getAdChanges: (projectId: string, params: { date: string; competitorId?: string }) => {
     const qs = new URLSearchParams({ date: params.date });
     if (params.competitorId) qs.set("competitor_id", params.competitorId);
     return request<AdChangesResponse>(`/projects/${projectId}/ad-changes?${qs.toString()}`);
   },
+  // §6 — 기간(주간) 조회. 기존 getAdChanges(단일 날짜)는 그대로 유지된다.
+  getAdChangesRange: (
+    projectId: string,
+    params: { startDate: string; endDate: string; competitorId?: string },
+  ) => {
+    const qs = new URLSearchParams({ start_date: params.startDate, end_date: params.endDate });
+    if (params.competitorId) qs.set("competitor_id", params.competitorId);
+    return request<AdChangesRangeResponse>(`/projects/${projectId}/ad-changes/range?${qs.toString()}`);
+  },
+
+  listCampaignTags: (projectId: string, includeInactive = false) => {
+    const qs = new URLSearchParams({ include_inactive: String(includeInactive) });
+    return request<CampaignTag[]>(`/projects/${projectId}/campaign-tags?${qs.toString()}`);
+  },
+  createCampaignTag: (projectId: string, payload: { name: string; definition: string }) =>
+    request<CampaignTag>(`/projects/${projectId}/campaign-tags`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateCampaignTag: (tagId: string, payload: { name?: string; definition?: string }) =>
+    request<CampaignTag>(`/campaign-tags/${tagId}`, { method: "PATCH", body: JSON.stringify(payload) }),
+  deleteCampaignTag: (tagId: string) =>
+    request<CampaignTag>(`/campaign-tags/${tagId}`, { method: "DELETE" }),
+  reclassifyCampaignTags: (projectId: string, includeUserAssigned = false) =>
+    request<{ reset_count: number }>(`/projects/${projectId}/campaign-tags/reclassify`, {
+      method: "POST",
+      body: JSON.stringify({ include_user_assigned: includeUserAssigned }),
+    }),
 
   adminLogin: (password: string) =>
     request<{ is_admin: boolean }>("/auth/admin", { method: "POST", body: JSON.stringify({ password }) }),
