@@ -19,6 +19,33 @@ export interface CampaignTag {
   updated_at: string;
 }
 
+// §2-1 — "기존 광고 반영" 결과. reset_count만으로는 상태를 온전히 표현하지 못한다(태그가 없던
+// 시절 생성된 광고는 이미 PENDING이라 reset 대상이 아니지만 여전히 "반영 대상"이다).
+export interface CampaignTagReclassifyResult {
+  reset_count: number;
+  already_pending_count: number;
+  total_target_count: number;
+}
+
+// §2-2 — "이번 재분류의 진행률"이 아니라 "현재 프로젝트 소재 분류 상태" 스냅샷.
+export interface CampaignTagClassificationStatusSummary {
+  pending: number;
+  success: number;
+  needs_review: number;
+  failed: number;
+}
+
+// §2-3 — "지금 재분류 실행"(bounded batch) 결과.
+export interface CampaignTagProcessPendingResult {
+  processed: number;
+  succeeded: number;
+  needs_review: number;
+  still_pending: number;
+  failed: number;
+  quota_stopped: boolean;
+  pending_remaining: number;
+}
+
 // ── VIDEO/CAROUSEL 미디어 메타데이터 (additive) ─────────────────────────
 export interface MediaItem {
   type: "image" | "video";
@@ -27,6 +54,15 @@ export interface MediaItem {
 }
 
 export type KeyframeStatus = "NOT_APPLICABLE" | "PENDING" | "SUCCESS" | "FAILED";
+
+// 여러 화면(Ad Detail Drawer, 기간별 변화 카드)이 공유하는 라벨 — 중복 정의 방지.
+export const FORMAT_LABEL: Record<string, string> = { IMAGE: "이미지", VIDEO: "영상", CAROUSEL: "캐러셀" };
+export const VISUAL_LABEL: Record<string, string> = {
+  PERSON: "인물",
+  PRODUCT: "제품",
+  TEXT_HEAVY: "텍스트 중심",
+  GRAPHIC: "그래픽",
+};
 
 export interface Project {
   id: string;
@@ -101,6 +137,8 @@ export interface DashboardMetrics {
   active_count: number;
   inactive_count: number;
   visual_type_ratio: Partial<Record<VisualType, number>>;
+  // §6-1 Gallery Lazy Load — 전체 Ad row 없이 "현재 추적 소재 N개"를 보여주기 위한 값.
+  live_ad_count: number;
 }
 
 export function survivalDays(ad: Ad): number {

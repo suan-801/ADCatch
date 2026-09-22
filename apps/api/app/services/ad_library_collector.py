@@ -71,9 +71,20 @@ def classify_and_extract_media(item: dict) -> tuple[AdFormat, str | None, str | 
     확인) 라이브 재검증은 하지 못했다 — reference 로직을 그대로 신뢰해 이식했고, 실제 운영
     데이터로 재검증이 필요하다(구현 보고서의 "남은 제한사항" 참고).
 
-    **format 결정 규칙은 카드 내부에 영상이 섞여 있어도 절대 바뀌지 않는다** — cards가 있으면
-    카드 중 일부/전부가 영상이어도 항상 CAROUSEL이다. "카드 내부 영상"은 media_items의 개별
-    항목 type에만 반영된다(CAROUSEL이 VIDEO로 오분류되는 것을 방지).
+    **format 결정 규칙 (2026-09 개정 — 카드가 2개 이상일 때만 CAROUSEL로 고정)**:
+      A. `snapshot.videos`에 실제 영상 URL이 1개 이상 있으면 → VIDEO.
+      B. `snapshot.cards`가 있고 **카드가 2개 이상**이면 → CAROUSEL. 카드 중 일부/전부가 영상이어도
+         포맷은 바뀌지 않는다("카드 내부 영상"은 media_items의 개별 항목 type에만 반영된다).
+      C. `snapshot.cards`가 **정확히 1개**이고 그 카드에 `video_hd_url`/`video_sd_url`이 있으면 →
+         VIDEO로 취급한다. Apify가 단일 영상 광고를 카드 1개짜리 `cards` 배열로 감싸 반환하는
+         케이스가 있어(§3-1), 카드 개수가 1개뿐일 때는 "여러 장을 넘겨보는 캐러셀"이라는 실제
+         의미가 없으므로 VIDEO로 판정하는 것이 raw semantics에 더 맞는다.
+      D. 카드가 1개이고 영상 URL이 없으면(순수 이미지 카드 1장) → IMAGE.
+      E. `snapshot.images`만 있으면 → IMAGE.
+
+    이 저장소에는 실제 Apify raw response 샘플이나 APIFY_TOKEN이 없어(2026-09 확인) 라이브
+    재검증은 하지 못했다 — reference 구현 + 테스트 fixture 근거로 이식했고, 실제 운영 데이터로
+    재검증이 필요하다(구현 보고서의 "남은 제한사항" 참고).
     """
     snap = item.get("snapshot") or {}
     videos = snap.get("videos") or []
@@ -96,6 +107,20 @@ def classify_and_extract_media(item: dict) -> tuple[AdFormat, str | None, str | 
         ]
         return AdFormat.VIDEO, representative_image_url, video_url, media_items
 
+    if len(cards) == 1:
+        # 규칙 C/D — 카드가 1개뿐이면 "여러 장을 넘겨보는 캐러셀"의 실제 의미가 없다. Apify가
+        # 단일 영상 광고를 cards=[{video_hd_url: ...}] 형태 1개짜리 배열로 반환하는 케이스를
+        # VIDEO로 정확히 잡아내기 위한 분기(카드가 2개 이상일 때만 CAROUSEL로 고정 — 규칙 B).
+        card = cards[0]
+        card_video_url = card.get("video_hd_url") or card.get("video_sd_url")
+        card_image_url = card.get("original_image_url") or card.get("resized_image_url")
+        if card_video_url:
+            media_items = [MediaItem(type="video", url=card_video_url, preview_url=card_image_url)]
+            return AdFormat.VIDEO, card_image_url, card_video_url, media_items
+        if card_image_url:
+            return AdFormat.IMAGE, card_image_url, None, [MediaItem(type="image", url=card_image_url)]
+        return AdFormat.IMAGE, None, None, []
+
     if cards:
         media_items = []
         representative_image_url: str | None = None
@@ -112,8 +137,9 @@ def classify_and_extract_media(item: dict) -> tuple[AdFormat, str | None, str | 
                 media_items.append(MediaItem(type="image", url=card_image_url))
                 if representative_image_url is None:
                     representative_image_url = card_image_url
-        # CAROUSEL은 카드 안에 영상이 섞여 있어도 포맷이 절대 VIDEO로 바뀌지 않는다. 카드 내부
-        # 영상의 다운로드/keyframe 캐싱은 이번 범위 밖(§8) — Drawer는 preview_url을 그대로 보여준다.
+        # CAROUSEL은 카드 안에 영상이 섞여 있어도(카드 2개 이상일 때) 포맷이 절대 VIDEO로 바뀌지
+        # 않는다. 카드 내부 영상의 다운로드/keyframe 캐싱은 이번 범위 밖(§8) — Drawer는 preview_url을
+        # 그대로 보여준다.
         return AdFormat.CAROUSEL, representative_image_url, None, media_items
 
     if images:

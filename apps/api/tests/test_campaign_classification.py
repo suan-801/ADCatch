@@ -105,6 +105,37 @@ def test_no_active_tags_skips_gemini_call(monkeypatch):
     assert result == (None, None, None)
 
 
+# ── §2-6: image_url 없이 copy_text/cta_text만으로 분류 ──────────────────────────
+
+
+def test_text_only_classification_skips_image_download_and_still_calls_gemini(monkeypatch):
+    tag = _tag()
+    monkeypatch.setattr(campaign_tagging.settings, "gemini_api_key", "test-key")
+    captured = {}
+
+    def fake_post(url, json, timeout):
+        captured["parts"] = json["contents"][0]["parts"]
+        return _FakeGeminiResponse(200, _gemini_body(str(tag.id), 0.8, "카피 기반 판단"))
+
+    with patch("app.services.campaign_tagging.httpx.get") as mocked_get, patch(
+        "app.services.campaign_tagging.httpx.post", side_effect=fake_post
+    ):
+        result = campaign_tagging.classify_campaign_tag(None, "정기후원 카피", "후원 신청하기", [tag])
+
+    mocked_get.assert_not_called()  # 이미지가 없으므로 다운로드 자체를 시도하지 않는다
+    assert len(captured["parts"]) == 1  # image part 없이 text part만 전송됨
+    assert result == (str(tag.id), 0.8, "카피 기반 판단")
+
+
+def test_no_image_no_copy_no_cta_skips_gemini_call(monkeypatch):
+    monkeypatch.setattr(campaign_tagging.settings, "gemini_api_key", "test-key")
+    tag = _tag()
+    with patch("app.services.campaign_tagging.httpx.post") as mocked_post:
+        result = campaign_tagging.classify_campaign_tag(None, None, None, [tag])
+    mocked_post.assert_not_called()
+    assert result == (None, None, None)
+
+
 def test_quota_exceeded_raises(monkeypatch):
     monkeypatch.setattr(campaign_tagging.settings, "gemini_api_key", "test-key")
     tag = _tag()
@@ -219,6 +250,49 @@ def test_pending_batch_skips_project_with_no_active_tags(db, competitor):
     _make_ad(db, competitor, "N1")
     with patch("app.services.pending_campaign_classification.campaign_tagging.classify_campaign_tag") as mocked:
         summary = process_pending_campaign_classification(db)
+    mocked.assert_not_called()
+    assert summary.processed == 0
+
+
+def test_pending_batch_includes_text_only_ads_without_image(db, competitor):
+    """§2-6: image_url이 없어도 copy_text/cta_text가 있으면 후보에서 제외되지 않는다."""
+    tag = _create_tag(db, competitor.project_id)
+    ad = Ad(
+        competitor_id=competitor.id,
+        ad_archive_id="TXT1",
+        image_url=None,
+        copy_text="정기후원 카피",
+        cta_text="후원 신청하기",
+        format="IMAGE",
+        campaign_classification_status="PENDING",
+    )
+    db.add(ad)
+    db.commit()
+
+    with patch(
+        "app.services.pending_campaign_classification.campaign_tagging.classify_campaign_tag",
+        return_value=(str(tag.id), 0.9, "카피 기반"),
+    ) as mocked:
+        summary = process_pending_campaign_classification(db)
+
+    mocked.assert_called_once()
+    assert summary.succeeded == 1
+
+
+def test_pending_batch_excludes_ad_with_no_image_no_copy_no_cta(db, competitor):
+    ad = Ad(
+        competitor_id=competitor.id, ad_archive_id="EMPTY1", image_url=None, copy_text=None, cta_text=None,
+        format="IMAGE", campaign_classification_status="PENDING",
+    )
+    db.add(ad)
+    db.commit()
+    _create_tag(db, competitor.project_id)
+
+    with patch(
+        "app.services.pending_campaign_classification.campaign_tagging.classify_campaign_tag"
+    ) as mocked:
+        summary = process_pending_campaign_classification(db)
+
     mocked.assert_not_called()
     assert summary.processed == 0
 

@@ -4,6 +4,9 @@ import type {
   AdChangesResponse,
   AdHistoryResponse,
   CampaignTag,
+  CampaignTagClassificationStatusSummary,
+  CampaignTagProcessPendingResult,
+  CampaignTagReclassifyResult,
   Competitor,
   CollectionFreshness,
   DashboardMetrics,
@@ -120,9 +123,19 @@ export const api = {
   deleteCampaignTag: (tagId: string) =>
     request<CampaignTag>(`/campaign-tags/${tagId}`, { method: "DELETE" }),
   reclassifyCampaignTags: (projectId: string, includeUserAssigned = false) =>
-    request<{ reset_count: number }>(`/projects/${projectId}/campaign-tags/reclassify`, {
+    request<CampaignTagReclassifyResult>(`/projects/${projectId}/campaign-tags/reclassify`, {
       method: "POST",
       body: JSON.stringify({ include_user_assigned: includeUserAssigned }),
+    }),
+  // §2-2 — "이번 재분류 진행률"이 아니라 "현재 프로젝트 소재 분류 상태" 스냅샷.
+  getCampaignTagClassificationStatus: (projectId: string) =>
+    request<CampaignTagClassificationStatusSummary>(`/projects/${projectId}/campaign-tags/reclassification-status`),
+  // §2-3 — "지금 재분류 실행". bounded batch(서버가 상한을 강제) — 한 요청에서 수십~수백 개를
+  // Gemini에 보내지 않는다.
+  processPendingCampaignTags: (projectId: string, limit?: number) =>
+    request<CampaignTagProcessPendingResult>(`/projects/${projectId}/campaign-tags/process-pending`, {
+      method: "POST",
+      body: JSON.stringify(limit ? { limit } : {}),
     }),
 
   adminLogin: (password: string) =>

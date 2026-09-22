@@ -15,7 +15,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -47,9 +47,14 @@ def process_pending_campaign_classification(
     db: Session,
     *,
     competitor_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
     limit: int | None = None,
 ) -> PendingCampaignClassificationSummary:
     """PENDING 소재를 oldest-first로 골라 Gemini 캠페인 분류를 재시도한다.
+
+    project_id를 넘기면 그 프로젝트 소속 경쟁사의 소재만 대상으로 한다(§2-3 "지금 재분류 실행" —
+    다른 프로젝트의 PENDING 광고가 함께 처리되면 안 된다). competitor_id와 동시에 지정하면 둘 다
+    만족하는 소재만 대상이 된다(둘 다 굳이 함께 쓸 일은 없지만 배타적이지 않게 둔다).
 
     - 정상 분류(confidence >= threshold): classification_status=SUCCESS, campaign_tag_id/
       confidence/reason 갱신, assignment_source=AI.
@@ -64,9 +69,17 @@ def process_pending_campaign_classification(
     """
     batch_limit = limit if limit is not None else settings.campaign_classification_pending_batch_size
 
-    query = select(Ad).where(Ad.campaign_classification_status == "PENDING", Ad.image_url.is_not(None))
+    # §2-6: image_url이 없어도 copy_text/cta_text 중 하나라도 있으면 텍스트만으로 분류를 시도할
+    # 수 있다(campaign_tagging.classify_campaign_tag가 image part 없이도 요청을 보낸다) — 셋 다
+    # 없는 소재만 후보에서 제외한다.
+    query = select(Ad).where(
+        Ad.campaign_classification_status == "PENDING",
+        or_(Ad.image_url.is_not(None), Ad.copy_text.is_not(None), Ad.cta_text.is_not(None)),
+    )
     if competitor_id is not None:
         query = query.where(Ad.competitor_id == competitor_id)
+    if project_id is not None:
+        query = query.where(Ad.competitor_id.in_(select(Competitor.id).where(Competitor.project_id == project_id)))
     # 활성 태그가 0개인 프로젝트의 소재는 스킵되므로, batch_limit보다 넉넉히 후보를 가져온다.
     query = query.order_by(Ad.first_seen_at.asc()).limit(batch_limit * 3)
 

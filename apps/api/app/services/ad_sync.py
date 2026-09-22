@@ -332,9 +332,32 @@ def synchronize_ad_status(
             existing.is_archived = False  # P0-04: 재등장한 아카이빙 광고 복원 (신규 row 생성 안 함)
             kept_active_count += 1
 
+            # format 교정(2026-09) — 과거에 잘못 판정된 format을 최신 raw 판정으로 바로잡는다.
+            # raw evidence(video_url 또는 media_items)가 명확할 때만 교정하고, 애매하거나 비어
+            # 있으면 기존 format을 절대 덮어쓰지 않는다(예: 일시적으로 빈 snapshot이 온 경우).
+            has_clear_media_evidence = bool(item.video_url) or bool(item.media_items)
+            if has_clear_media_evidence and item.format.value != existing.format:
+                was_video = existing.format == AdFormat.VIDEO.value
+                existing.format = item.format.value
+                if item.video_url:
+                    existing.video_url = item.video_url
+                if item.media_items:
+                    existing.media_items = [m.model_dump() for m in item.media_items]
+                if item.format == AdFormat.VIDEO and existing.video_url and not existing.keyframe_urls:
+                    # 새로 VIDEO로 교정됐고 아직 성공적으로 캐싱된 keyframe이 없으면 pending 배치
+                    # 대상에 새로 넣는다(이미 SUCCESS인 keyframe은 불필요하게 초기화하지 않는다).
+                    existing.keyframe_status = "PENDING"
+                    existing.keyframe_retry_count = 0
+                    existing.keyframe_error = None
+                elif was_video and item.format != AdFormat.VIDEO:
+                    # VIDEO → CAROUSEL/IMAGE로 교정된 경우 더 이상 keyframe 대상이 아니다. 이미
+                    # Storage에 업로드된 keyframe 파일은 destructive cleanup 대상이 아니므로
+                    # keyframe_urls 배열 자체는 건드리지 않고 상태만 NOT_APPLICABLE로 되돌린다.
+                    existing.keyframe_status = "NOT_APPLICABLE"
+
             # VIDEO/CAROUSEL 미디어 backfill — 이 컬럼들이 생기기 전에 수집된 기존 소재가 재발견될
-            # 때마다 빈 필드만 채운다(이미 캐싱된 값은 절대 덮어쓰지 않는다). 별도 백필 스크립트 없이
-            # 다음 수집 사이클에서 자연스럽게 채워지게 한다.
+            # 때마다(format이 그대로인 경우) 빈 필드만 채운다(이미 캐싱된 값은 절대 덮어쓰지 않는다).
+            # 별도 백필 스크립트 없이 다음 수집 사이클에서 자연스럽게 채워지게 한다.
             if existing.video_url is None and item.video_url:
                 existing.video_url = item.video_url
             if not existing.media_items and item.media_items:

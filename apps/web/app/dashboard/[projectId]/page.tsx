@@ -38,6 +38,12 @@ export default function CurrentDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [galleryFilters, setGalleryFilters] = useState(DEFAULT_GALLERY_FILTERS);
   const [selectedAd, setSelectedAd] = useState<(Ad & { competitor_name?: string }) | null>(null);
+  // §6 Gallery Lazy Load — 첫 진입 시 전체 Ad를 가져오지 않는다. 사용자가 "더 자세히 보기"를
+  // 눌렀을 때 최초 1회만 fetch하고, 그 뒤로는 같은 페이지 session 안에서 재사용한다(접기/열기 시
+  // 재요청하지 않음).
+  const [galleryExpanded, setGalleryExpanded] = useState(false);
+  const [galleryLoaded, setGalleryLoaded] = useState(false);
+  const [galleryLoading, setGalleryLoading] = useState(false);
   // Initial Baseline + Daily Catch Opt-in UX — 방금 완료된 baseline 수집에 대한 CTA(있으면).
   const [baselineCta, setBaselineCta] = useState<{
     competitorName: string;
@@ -74,17 +80,39 @@ export default function CurrentDashboardPage() {
       .catch((e) => setError(String(e)));
   }, [projectId, week, galleryCompetitorId]);
 
-  // §13-1 성능 최적화 — 브랜드별 listAds() N회 호출 대신 프로젝트 전체를 1회로 조회한다.
+  // 브랜드가 하나도 없어지면(삭제 등) 갤러리 상태도 초기화한다 — 다음에 브랜드가 생기면 다시
+  // "더 자세히 보기"를 눌러야 fetch한다(자동으로 다시 불러오지 않음).
   useEffect(() => {
     if (competitors.length === 0) {
       setAds([]);
+      setGalleryLoaded(false);
+      setGalleryExpanded(false);
+    }
+  }, [competitors]);
+
+  // §6 Gallery Lazy Load — "더 자세히 보기"를 눌렀을 때만(§13-1의 project-wide 엔드포인트를 그대로
+  // 재사용) 최초 1회 호출한다. 첫 dashboard 진입 시에는 이 API를 전혀 호출하지 않는다.
+  const handleToggleGallery = async () => {
+    if (galleryExpanded) {
+      setGalleryExpanded(false); // 카드 UI는 접어서 숨긴다 — ads state는 유지하므로 다시 열어도 재요청 없음
       return;
     }
-    api
-      .listProjectAds(projectId)
-      .then(setAds)
-      .catch((e) => setError(String(e)));
-  }, [projectId, competitors]);
+    if (!galleryLoaded) {
+      setGalleryLoading(true);
+      setError(null);
+      try {
+        const list = await api.listProjectAds(projectId);
+        setAds(list);
+        setGalleryLoaded(true);
+      } catch (e) {
+        setError(String(e));
+        setGalleryLoading(false);
+        return;
+      }
+      setGalleryLoading(false);
+    }
+    setGalleryExpanded(true);
+  };
 
   const handleCreateCompetitor = async (payload: { name: string; ad_library_url: string }) => {
     const competitor = await api.createCompetitor(projectId, payload);
@@ -100,11 +128,15 @@ export default function CurrentDashboardPage() {
     setError(null);
     try {
       const result = await api.collectNow(competitorId);
+      // §6-4: 상단 분석(metrics/range/freshness)은 항상 최신화하되, 사용자가 갤러리를 아직 열지
+      // 않았다면 전체 Ad fetch는 하지 않는다.
       await refreshDashboard();
-      await api
-        .listProjectAds(projectId)
-        .then(setAds)
-        .catch(() => {});
+      if (galleryLoaded) {
+        await api
+          .listProjectAds(projectId)
+          .then(setAds)
+          .catch(() => {});
+      }
 
       // §25: 실패/부분 수집은 절대 baseline 기준점으로 삼지 않는다 — SUCCESS(snapshot 완전)일 때만.
       if (result.is_baseline && result.snapshot_complete) {
@@ -220,23 +252,62 @@ export default function CurrentDashboardPage() {
 
           <section>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              {/* B-07: 필터가 걸려있으면 "필터결과 / 전체"로, 아니면 전체 개수만 보여준다. */}
+              {/* B-07: 필터가 걸려있으면 "필터결과 / 전체"로, 아니면 전체 개수만 보여준다.
+                  §6 Gallery Lazy Load: 갤러리를 열기 전에는 전체 Ad row 없이도 DashboardMetrics의
+                  live_ad_count(SQL COUNT 기반, Gallery와 동일하게 is_archived=false 기준)로 개수를
+                  보여준다. */}
               <h2 className="text-lg font-bold text-foreground">
                 라이브 소재 갤러리{" "}
                 <span className="ml-1 text-sm font-medium text-muted">
-                  {filteredAds.length === ads.length ? ads.length : `${filteredAds.length} / ${ads.length}`}
+                  {galleryLoaded
+                    ? filteredAds.length === ads.length
+                      ? ads.length
+                      : `${filteredAds.length} / ${ads.length}`
+                    : (metrics?.live_ad_count ?? "")}
                 </span>
               </h2>
+              {galleryExpanded && (
+                <button
+                  type="button"
+                  onClick={handleToggleGallery}
+                  className="text-xs font-semibold text-muted hover:text-foreground"
+                >
+                  접기 ↑
+                </button>
+              )}
             </div>
-            <div className="mb-4">
-              <GalleryFilters value={galleryFilters} onChange={setGalleryFilters} campaignTags={campaignTags} />
-            </div>
-            <AdGallery
-              ads={filteredAds}
-              totalCount={ads.length}
-              onCardClick={setSelectedAd}
-              campaignTags={campaignTags}
-            />
+
+            {!galleryExpanded ? (
+              <div className="rounded-2xl border border-dashed border-border p-8 text-center">
+                <p className="text-sm text-muted">
+                  {metrics ? `현재 추적 소재 ${metrics.live_ad_count}개` : "불러오는 중..."}
+                  <br />
+                  필터를 이용해 전체 광고 소재를 확인할 수 있습니다.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleToggleGallery}
+                  disabled={galleryLoading}
+                  className="mt-4 rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
+                >
+                  {galleryLoading ? "소재를 불러오는 중..." : "더 자세히 보기 ↓"}
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* §6-5: 갤러리가 접혀 있을 때는 무거운 GalleryFilters를 아예 렌더링하지 않는다 —
+                    "더 자세히 보기" 이후에만 노출한다. */}
+                <div className="mb-4">
+                  <GalleryFilters value={galleryFilters} onChange={setGalleryFilters} campaignTags={campaignTags} />
+                </div>
+                <AdGallery
+                  ads={filteredAds}
+                  totalCount={ads.length}
+                  onCardClick={setSelectedAd}
+                  campaignTags={campaignTags}
+                />
+              </>
+            )}
           </section>
 
           {/* Part F-01: 브랜드 관리는 분석 섹션보다 아래로 내린다 — 메인 화면의 주인공은

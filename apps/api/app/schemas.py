@@ -152,7 +152,42 @@ class CampaignTagReclassifyRequest(BaseModel):
 
 
 class CampaignTagReclassifyResult(BaseModel):
+    # SUCCESS/NEEDS_REVIEW/FAILED에서 PENDING으로 실제 리셋한 개수.
     reset_count: int
+    # 이미 PENDING이라 리셋할 필요는 없지만, 활성 태그 기준 pending 배치의 대상인 기존 광고 수
+    # (예: 태그가 없던 시절 생성된 광고) — reset_count에 포함되지 않아도 "기존 광고 반영"
+    # 대상임을 사용자에게 명확히 보여주기 위한 값.
+    already_pending_count: int
+    # reset_count + already_pending_count — 이번 "기존 광고 반영"의 전체 대상 수.
+    total_target_count: int
+
+
+class CampaignTagClassificationStatusOut(BaseModel):
+    """§2-2 — "이번 재분류 진행률"이 아니라 "현재 프로젝트 소재 분류 상태" 스냅샷이다. 별도
+    job/batch 추적 테이블 없이 Ad.campaign_classification_status를 그대로 집계한 값이므로,
+    이전에 이미 분류됐던 소재의 SUCCESS도 포함된다 — UI에서 "이번 재분류 대상 수"
+    (CampaignTagReclassifyResult)와 혼동되지 않도록 별도 레이블로 표시해야 한다."""
+
+    pending: int
+    success: int
+    needs_review: int
+    failed: int
+
+
+class CampaignTagProcessPendingRequest(BaseModel):
+    limit: int | None = None
+
+
+class CampaignTagProcessPendingResult(BaseModel):
+    processed: int
+    succeeded: int
+    needs_review: int
+    still_pending: int
+    failed: int
+    quota_stopped: bool
+    # 이 배치 실행 후에도 프로젝트에 남아있는 PENDING 소재 수(참고용 — Daily Scheduler가
+    # 사용자가 페이지를 떠난 뒤에도 계속 처리한다).
+    pending_remaining: int
 
 
 class AdCampaignTagUpdate(BaseModel):
@@ -221,6 +256,11 @@ class DashboardMetrics(BaseModel):
     active_count: int
     inactive_count: int
     visual_type_ratio: dict[str, int]
+    # §6-1 성능 최적화(Gallery Lazy Load) — 전체 Ad row를 가져오지 않고도 갤러리 개수를 보여주기
+    # 위한 값. new_count+active_count+inactive_count와 항상 동일하다(이 세 상태가 is_archived=false
+    # 소재를 정확히 분할하므로) — 별도 쿼리 없이 파생시킨다. Gallery의 "현재 추적 소재 N개"와
+    # 동일한 기준(Ad.is_archived == false)을 사용한다.
+    live_ad_count: int
 
 
 class SyncResult(BaseModel):

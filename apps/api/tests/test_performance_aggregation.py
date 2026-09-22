@@ -31,6 +31,8 @@ def test_dashboard_sql_aggregation_matches_expected_counts(db, competitor):
     assert metrics.active_count == 2  # A5는 아카이빙이라 제외
     assert metrics.inactive_count == 1
     assert metrics.visual_type_ratio == {"PERSON": 2, "PRODUCT": 1}
+    # §6-1 Gallery Lazy Load — live_ad_count는 non-archived ads(Gallery와 동일 기준) 개수와 같다.
+    assert metrics.live_ad_count == 4
 
 
 def test_freshness_window_function_matches_per_competitor_latest_run(db, competitor):

@@ -111,3 +111,68 @@ def test_resized_image_url_fallback_when_original_missing():
     item = {"snapshot": {"images": [{"resized_image_url": "https://cdn/resized.jpg"}]}}
     _, image_url, _, _ = classify_and_extract_media(item)
     assert image_url == "https://cdn/resized.jpg"
+
+
+# ── 2026-09 사용자 피드백: 단일 카드 영상 오분류(카드가 1개뿐이면 CAROUSEL이 아니라 VIDEO) ─────
+
+
+def test_single_card_with_video_hd_url_is_video_not_carousel():
+    """Apify가 단일 영상 광고를 cards=[{video_hd_url: ...}] 형태 1개짜리 배열로 반환하는 실제
+    케이스 — 카드가 1개뿐이면 "여러 장 넘겨보는 캐러셀"의 의미가 없으므로 VIDEO로 판정한다."""
+    item = {
+        "snapshot": {
+            "cards": [
+                {
+                    "video_hd_url": "https://cdn/single.mp4",
+                    "original_image_url": "https://cdn/single-poster.jpg",
+                }
+            ]
+        }
+    }
+    fmt, image_url, video_url, media_items = classify_and_extract_media(item)
+    assert fmt == AdFormat.VIDEO
+    assert video_url == "https://cdn/single.mp4"
+    assert image_url == "https://cdn/single-poster.jpg"
+    assert [m.type for m in media_items] == ["video"]
+
+
+def test_single_card_with_video_sd_url_only_is_video():
+    item = {"snapshot": {"cards": [{"video_sd_url": "https://cdn/single-sd.mp4"}]}}
+    fmt, _, video_url, _ = classify_and_extract_media(item)
+    assert fmt == AdFormat.VIDEO
+    assert video_url == "https://cdn/single-sd.mp4"
+
+
+def test_single_card_image_only_is_image_not_carousel():
+    """카드가 1개이고 영상이 없으면(순수 이미지 카드 1장) IMAGE로 취급한다."""
+    item = {"snapshot": {"cards": [{"original_image_url": "https://cdn/single.jpg"}]}}
+    fmt, image_url, video_url, media_items = classify_and_extract_media(item)
+    assert fmt == AdFormat.IMAGE
+    assert image_url == "https://cdn/single.jpg"
+    assert video_url is None
+    assert [m.type for m in media_items] == ["image"]
+
+
+def test_single_card_with_no_media_at_all():
+    item = {"snapshot": {"cards": [{}]}}
+    fmt, image_url, video_url, media_items = classify_and_extract_media(item)
+    assert fmt == AdFormat.IMAGE
+    assert image_url is None
+    assert media_items == []
+
+
+def test_multi_card_all_video_still_carousel():
+    """카드가 2개 이상이면 전부 영상이어도 여전히 CAROUSEL이다(규칙 B) — 단일 카드일 때만
+    VIDEO로 취급하는 규칙 C와 구분."""
+    item = {
+        "snapshot": {
+            "cards": [
+                {"video_hd_url": "https://cdn/c1.mp4"},
+                {"video_hd_url": "https://cdn/c2.mp4"},
+            ]
+        }
+    }
+    fmt, _, video_url, media_items = classify_and_extract_media(item)
+    assert fmt == AdFormat.CAROUSEL
+    assert video_url is None
+    assert [m.type for m in media_items] == ["video", "video"]

@@ -47,12 +47,19 @@ def get_dashboard(
         ).all()
     )
 
+    new_count = status_counts.get(AdStatus.NEW.value, 0)
+    active_count = status_counts.get(AdStatus.ACTIVE.value, 0)
+    inactive_count = status_counts.get(AdStatus.INACTIVE.value, 0)
+
     return DashboardMetrics(
         project_id=project_id,
-        new_count=status_counts.get(AdStatus.NEW.value, 0),
-        active_count=status_counts.get(AdStatus.ACTIVE.value, 0),
-        inactive_count=status_counts.get(AdStatus.INACTIVE.value, 0),
+        new_count=new_count,
+        active_count=active_count,
+        inactive_count=inactive_count,
         visual_type_ratio=visual_counts,
+        # NEW/ACTIVE/INACTIVE가 is_archived=false 소재를 정확히 분할하므로 합산이 곧 갤러리 개수다
+        # — Gallery Lazy Load(§6)의 "전체 소재 보기 접힘 카드"가 전체 Ad row 없이 표시할 수 있다.
+        live_ad_count=new_count + active_count + inactive_count,
     )
 
 

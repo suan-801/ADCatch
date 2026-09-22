@@ -1,7 +1,5 @@
-import { useParams } from "next/navigation";
-import Link from "next/link";
 import type { ChangedAd } from "@/lib/types";
-import { runningDays } from "@/lib/types";
+import { FORMAT_LABEL, VISUAL_LABEL, runningDays } from "@/lib/types";
 
 const EVENT_BADGE: Record<ChangedAd["event_type"], { label: string; className: string }> = {
   STARTED: { label: "NEW", className: "bg-blue-50 text-status-new border border-status-new/30" },
@@ -12,12 +10,25 @@ const EVENT_BADGE: Record<ChangedAd["event_type"], { label: string; className: s
   BASELINE_DISCOVERED: { label: "기존 집행", className: "bg-slate-100 text-muted border border-border" },
 };
 
+function formatDate(iso: string): string {
+  return iso.slice(0, 10).replaceAll("-", ".");
+}
+
 // 브리핑 §32/§33: 기존 Ad Card(ad-gallery.tsx)와 동일한 이미지 우선 카드 구조를 공유하되,
 // 상태 배지 대신 "이 날짜에 무슨 일이 있었는지"를 나타내는 이벤트 배지를 보여준다.
-// §36: 클릭하면 별도 Detail 화면을 새로 만들지 않고, 기존 "현재 현황" 갤러리로 이동해
-// 해당 경쟁사 소재를 이어서 볼 수 있게 한다.
-export function ChangedAdCard({ ad }: { ad: ChangedAd }) {
-  const { projectId } = useParams<{ projectId: string }>();
+//
+// §4(2026-09 사용자 피드백) — 클릭 시 더 이상 메인 갤러리로 페이지 이동(Link)하지 않는다. 대신
+// 같은 위치에서 compact ↔ expanded를 토글한다: router.push/Link/window.location/URL query 변경을
+// 전혀 쓰지 않으므로 페이지 새로고침·스크롤 이동이 없다.
+export function ChangedAdCard({
+  ad,
+  expanded,
+  onToggle,
+}: {
+  ad: ChangedAd;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const badge = EVENT_BADGE[ad.event_type];
   // P1-01: 이 이벤트 카드는 "그 날 그 순간"의 숫자를 보여줘야 한다 — ad의 현재 값으로 라이브
   // 계산하면 이후 REACTIVATED 등으로 last_seen_at이 앞으로 밀릴 때 과거 카드의 숫자까지 바뀐다.
@@ -26,20 +37,62 @@ export function ChangedAdCard({ ad }: { ad: ChangedAd }) {
     ad.survival_days_at_event != null
       ? { days: ad.survival_days_at_event, label: ad.source_started_at ? ("집행" as const) : ("추적" as const) }
       : runningDays(ad);
+  const metaLibraryUrl = `https://www.facebook.com/ads/library/?id=${ad.ad_archive_id}`;
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onToggle();
+    }
+  };
+
+  if (!expanded) {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={false}
+        onClick={onToggle}
+        onKeyDown={handleKeyDown}
+        className="flex cursor-pointer items-center gap-3 rounded-2xl border border-border bg-white p-3 text-left transition-shadow hover:shadow-md"
+      >
+        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-slate-50">
+          {ad.image_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={ad.image_url} alt={ad.copy_text ?? "ad creative"} className="h-full w-full object-cover" />
+          ) : (
+            <span className="text-[9px] text-muted">{ad.format ?? "-"}</span>
+          )}
+        </div>
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ${badge.className}`}>
+              {badge.label}
+            </span>
+            <span className="truncate text-xs font-medium text-muted">{ad.competitor_name}</span>
+          </div>
+          {ad.copy_text && <p className="line-clamp-2 text-xs text-foreground">{ad.copy_text}</p>}
+          {ad.event_date && <p className="text-[10px] text-muted">{formatDate(ad.event_date)}</p>}
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <Link
-      href={`/dashboard/${projectId}?competitor=${ad.competitor_id}`}
-      className="group block overflow-hidden rounded-2xl border border-border bg-white transition-shadow hover:shadow-md"
+    <div
+      role="button"
+      tabIndex={0}
+      aria-expanded={true}
+      onKeyDown={handleKeyDown}
+      className="overflow-hidden rounded-2xl border border-brand/40 bg-white shadow-md"
     >
-      <div className="relative flex aspect-[4/5] items-center justify-center bg-slate-50">
+      <div
+        className="relative flex aspect-[4/5] cursor-pointer items-center justify-center bg-slate-50"
+        onClick={onToggle}
+      >
         {ad.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={ad.image_url}
-            alt={ad.copy_text ?? "ad creative"}
-            className="h-full w-full object-contain transition-transform group-hover:scale-[1.02]"
-          />
+          <img src={ad.image_url} alt={ad.copy_text ?? "ad creative"} className="h-full w-full object-contain" />
         ) : (
           <span className="text-xs text-muted">{ad.format ?? "미디어 없음"}</span>
         )}
@@ -48,15 +101,69 @@ export function ChangedAdCard({ ad }: { ad: ChangedAd }) {
           <p className="text-[9px] font-semibold uppercase tracking-wide text-white/70">{running.label}</p>
         </div>
       </div>
-      <div className="space-y-2 p-4">
+
+      <div className="space-y-3 p-4">
         <div className="flex items-center justify-between gap-2">
-          <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${badge.className}`}>
-            {badge.label}
-          </span>
-          <span className="truncate text-xs font-medium text-muted">{ad.competitor_name}</span>
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold ${badge.className}`}>
+              {badge.label}
+            </span>
+            <span className="text-xs font-medium text-muted">{ad.competitor_name}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-label="접기"
+            className="rounded-full p-1 text-muted hover:bg-slate-100 hover:text-foreground"
+          >
+            ✕
+          </button>
         </div>
-        {ad.copy_text && <p className="line-clamp-2 text-sm text-foreground">{ad.copy_text}</p>}
+
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+          {ad.event_date && (
+            <div>
+              <dt className="text-muted">이벤트 날짜</dt>
+              <dd className="mt-0.5 font-semibold text-foreground">{formatDate(ad.event_date)}</dd>
+            </div>
+          )}
+          <div>
+            <dt className="text-muted">포맷</dt>
+            <dd className="mt-0.5 font-semibold text-foreground">{ad.format ? FORMAT_LABEL[ad.format] : "-"}</dd>
+          </div>
+          <div>
+            <dt className="text-muted">비주얼</dt>
+            <dd className="mt-0.5 font-semibold text-foreground">{ad.visual_type ? VISUAL_LABEL[ad.visual_type] : "-"}</dd>
+          </div>
+          <div>
+            <dt className="text-muted">{running.label} 일수</dt>
+            <dd className="mt-0.5 font-semibold text-foreground">{running.days}일째</dd>
+          </div>
+        </dl>
+
+        {ad.copy_text && (
+          <div>
+            <p className="text-xs font-semibold text-muted">광고 카피</p>
+            <p className="mt-1 whitespace-pre-wrap text-sm text-foreground">{ad.copy_text}</p>
+          </div>
+        )}
+        {ad.cta_text && (
+          <div>
+            <p className="text-xs font-semibold text-muted">CTA</p>
+            <p className="mt-1 text-sm text-foreground">{ad.cta_text}</p>
+          </div>
+        )}
+
+        <a
+          href={metaLibraryUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="block w-full rounded-full border border-border px-4 py-2 text-center text-xs font-semibold text-foreground hover:border-brand hover:text-brand-dark"
+        >
+          Meta에서 보기
+        </a>
       </div>
-    </Link>
+    </div>
   );
 }

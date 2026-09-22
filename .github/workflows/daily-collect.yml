@@ -16,6 +16,18 @@ jobs:
         with:
           python-version: "3.12"
 
+      # VIDEO keyframe pending batch(app/services/pending_video_keyframes.py)가 ffmpeg/ffprobe를
+      # shutil.which()로 찾는다 — ubuntu-latest runner에 우연히 설치돼 있다는 가정에 의존하지
+      # 않고 명시적으로 설치한다. 없으면 keyframe 추출은 즉시 FAILED로 처리되고(무한 재시도 방지),
+      # 기존 preview 썸네일로는 정상 폴백되므로 Core Collection 자체는 영향받지 않는다.
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Verify ffmpeg/ffprobe
+        run: |
+          ffmpeg -version
+          ffprobe -version
+
       - name: Install dependencies
         working-directory: apps/api
         run: pip install -r requirements.txt

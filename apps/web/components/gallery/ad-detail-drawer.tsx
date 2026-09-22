@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { Ad, AdHistoryEvent, CampaignTag } from "@/lib/types";
-import { runningDays, survivalDays } from "@/lib/types";
+import { FORMAT_LABEL, VISUAL_LABEL, runningDays, survivalDays } from "@/lib/types";
 import { api } from "@/lib/api";
 import { StatusBadge } from "@/components/status-badge";
 
@@ -11,13 +11,6 @@ import { StatusBadge } from "@/components/status-badge";
 
 type DrawerAd = Ad & { competitor_name?: string };
 
-const FORMAT_LABEL: Record<string, string> = { IMAGE: "이미지", VIDEO: "영상", CAROUSEL: "캐러셀" };
-const VISUAL_LABEL: Record<string, string> = {
-  PERSON: "인물",
-  PRODUCT: "제품",
-  TEXT_HEAVY: "텍스트 중심",
-  GRAPHIC: "그래픽",
-};
 const EVENT_LABEL: Record<AdHistoryEvent["event_type"], string> = {
   STARTED: "NEW",
   REACTIVATED: "REACTIVATED",
@@ -109,8 +102,26 @@ function CampaignTagSection({
   );
 }
 
+// §3-5 — VIDEO인데 keyframe이 없으면 그냥 대표 이미지 한 장만 보여주고 끝내지 않는다. 상태를
+// 명확히 알려준다. SUCCESS인데 urls가 비어 있는 모순 상태도 디버깅 가능하게 남긴다(조용히
+// PENDING인 척하지 않는다).
+function videoKeyframeStatusCaption(ad: DrawerAd): string | null {
+  if (ad.format !== "VIDEO") return null;
+  if (ad.keyframe_urls.length > 0) return null;
+  if (ad.keyframe_status === "PENDING") return "영상 장면 추출 대기 중";
+  if (ad.keyframe_status === "FAILED") return "영상 장면 추출에 실패해 대표 이미지로 표시하고 있습니다.";
+  if (ad.keyframe_status === "SUCCESS") {
+    // 모순 상태(SUCCESS인데 urls 없음) — 조용히 넘기지 않고 원인을 알 수 있게 남긴다.
+    return "영상 장면 정보를 불러오지 못했습니다(대표 이미지로 표시 중).";
+  }
+  return null; // NOT_APPLICABLE — VIDEO인데 이 값이면 데이터 정합성 문제지만, UI는 조용히 대표 이미지로 폴백.
+}
+
 function MediaDetail({ ad }: { ad: DrawerAd }) {
-  // VIDEO — keyframe이 캐싱돼 있으면 2x2 grid, 없으면(PENDING/FAILED) 기존 단일 preview로 fallback.
+  const keyframeCaption = videoKeyframeStatusCaption(ad);
+
+  // VIDEO — keyframe이 캐싱돼 있으면 2x2 grid, 없으면(PENDING/FAILED/모순 상태) 기존 단일
+  // preview로 fallback하되 상태 캡션을 함께 보여준다.
   if (ad.format === "VIDEO" && ad.keyframe_urls.length > 0) {
     return (
       <div className="grid grid-cols-2 gap-1.5">
@@ -118,6 +129,26 @@ function MediaDetail({ ad }: { ad: DrawerAd }) {
           // eslint-disable-next-line @next/next/no-img-element
           <img key={i} src={url} alt={`장면 ${i + 1}`} className="aspect-square w-full rounded-lg object-cover" />
         ))}
+      </div>
+    );
+  }
+
+  if (ad.format === "VIDEO") {
+    return (
+      <div>
+        <div className="flex aspect-[4/5] items-center justify-center rounded-xl bg-slate-50">
+          {ad.image_url ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={ad.image_url}
+              alt={ad.copy_text ?? "ad creative"}
+              className="h-full w-full rounded-xl object-contain"
+            />
+          ) : (
+            <span className="text-xs text-muted">미디어 없음</span>
+          )}
+        </div>
+        {keyframeCaption && <p className="mt-1.5 text-center text-xs text-muted">{keyframeCaption}</p>}
       </div>
     );
   }

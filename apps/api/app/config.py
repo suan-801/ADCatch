@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     campaign_tag_confidence_threshold: float = 0.6
     campaign_classification_pending_batch_size: int = 20
     campaign_classification_max_retries: int = 3
+    # "지금 재분류 실행"(사용자가 직접 누르는 동기 요청) 한 번에 처리할 소재 수 상한 — Daily
+    # Scheduler의 대형 배치(campaign_classification_pending_batch_size)와 별개로, 요청 1건에서
+    # 수십~수백 개를 Gemini에 보내지 않도록 작게 제한한다.
+    campaign_classification_manual_batch_size: int = 10
 
     # ── VIDEO Keyframe 캐싱 (2026-09) ────────────────────────────────────
     # 신규 수집 동기 경로에서는 절대 실행하지 않는다 — 별도 pending 배치(process_pending_video_keyframes)
