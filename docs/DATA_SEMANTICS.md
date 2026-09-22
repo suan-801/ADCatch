@@ -205,58 +205,102 @@ Gemini 호출을 하지 않고, 대상 `Ad`의 `campaign_tag_id`/`assignment_sou
 별도의 `AdCampaignTagAssignmentHistory` 테이블(assignment 변경 이력) 도입을 검토한다 — 현재는
 범위 밖이다.
 
-## 10. VIDEO/CAROUSEL 미디어 메타데이터 (2026-09)
+## 10. VIDEO/CAROUSEL 미디어 메타데이터 (2026-09, 2026-09-22 재설계)
 
 `Ad.image_url`은 포맷과 무관하게 계속 "대표 썸네일 1장"으로 쓰인다(기존 갤러리 동작 불변).
 아래 필드들은 원본 미디어 구조를 additive로 보존해 VIDEO/CAROUSEL 상세 UI에 쓴다.
 
 - `video_url`: **VIDEO 포맷 전용**(HD 우선, SD fallback). CAROUSEL/IMAGE는 항상 NULL — 카드
-  내부에 영상이 섞여 있어도(아래 참고) 최상위 `video_url`에는 반영하지 않는다.
+  내부에 영상이 섞여 있어도(아래 참고) 최상위 `video_url`에는 반영하지 않는다. **이 값은 영구
+  캐시가 아니라 Meta의 signed CDN source URL이다** — format이 VIDEO인 동안은 fresh 수집마다
+  최신 값으로 refresh된다(아래 backfill/교정 항목 참고). Supabase Storage에 영구 저장되는 것은
+  이 URL로부터 추출한 keyframe 이미지뿐, mp4 원본 자체는 저장하지 않는다.
 - `media_items`(JSON 배열, `[{type: "image"|"video", url, preview_url}]`): 원본 videos/cards/
-  images 구조를 그대로 보존한다.
+  images 구조를 그대로 보존한다. video 항목의 `preview_url`은 `video_preview_image_url →
+  original_image_url → resized_image_url` 우선순위로 채워져, 영상 URL은 있는데 poster가 없는
+  케이스를 최대한 없앤다. 빈 URL은 담기지 않고 동일 URL은 중복 제거된다.
 - `keyframe_urls`/`keyframe_status`/`keyframe_retry_count`/`keyframe_error`: VIDEO 소재의
-  캐싱된 keyframe(최대 4장) — `analysis_status`(Gemini Vision)와 동일한 PENDING→SUCCESS/FAILED
+  캐싱된 Key Visual — `analysis_status`(Gemini Vision)와 동일한 PENDING→SUCCESS/FAILED
   lifecycle을 따르되, **Core Collection의 동기 enrichment 경로에서는 절대 생성되지 않는다.**
-  신규 VIDEO 소재는 생성 시 `keyframe_status=PENDING`만 세팅되고, 실제 추출(영상 다운로드+
-  ffprobe+ffmpeg+Storage 업로드)은 완전히 분리된 별도 배치
+  신규 VIDEO 소재는 생성 시 `keyframe_status=PENDING`만 세팅되고, 실제 추출(영상 stream
+  다운로드+ffprobe+ffmpeg+Storage 업로드+임시 mp4 삭제)은 완전히 분리된 별도 배치
   (`app.services.pending_video_keyframes.process_pending_video_keyframes`)가 담당한다 — 무거운
   작업을 이미 여러 소재를 동시 처리하는 동기 enrichment 경로에 추가해 수집 자체를 느리게 만들지
-  않기 위함이다.
+  않기 위함이다. **`keyframe_urls`는 정확히 4장(`video_keyframe_count`) 추출+업로드가 모두
+  성공해야 `SUCCESS`로 확정된다** — 1~3장만 성공한 경우는 SUCCESS로 취급하지 않고 재시도 가능한
+  실패로 남긴다(`keyframe_retry_count` 증가 후 `video_keyframe_max_retries` 초과 시 `FAILED`).
+  4개 지점은 8%/35%/65%/92%(마케팅 영상의 Hook·CTA를 포함하도록 배치), 해상도는 원본 그대로가
+  아니라 최대 너비 `video_keyframe_max_width`(기본 720px)로 제한한다(비율 유지, upscale 없음 —
+  ffmpeg scale filter로 추출 시점에 처리). 원본 mp4는 tempfile에 stream으로만 받고(전체를
+  메모리에 올리지 않음, `video_keyframe_max_download_bytes` 상한 초과 시 즉시 중단), 성공/실패와
+  무관하게 처리가 끝나면 항상 삭제한다 — Supabase에는 keyframe 이미지만 남는다.
 
-**format 판별 규칙 (2026-09 두 차례 개정 — 카드가 2개 이상일 때만 CAROUSEL로 고정)**:
-1. `snapshot.videos`에 실제 영상 URL이 있으면 → `VIDEO`.
-2. `snapshot.cards`가 있고 **카드가 2개 이상**이면 → `CAROUSEL`. 카드 중 일부/전부가 영상이어도
-   포맷은 바뀌지 않는다 — "카드 내부 영상"은 `media_items`의 개별 항목 `type`에만 반영된다.
-3. `snapshot.cards`가 **정확히 1개**이고 그 카드에 영상 URL이 있으면 → `VIDEO`로 취급한다
-   (Apify가 단일 영상 광고를 카드 1개짜리 `cards` 배열로 감싸 반환하는 케이스 대응 — 카드가
-   1개뿐이면 "여러 장 넘겨보는 캐러셀"이라는 의미 자체가 없다). 카드가 1개이고 영상이 없으면
+**format 판별 규칙 (2026-09-22 재설계 — raw `display_format`을 우선 evidence로 사용)**:
+재현 사례(`ad_archive_id=1411948807546506`)에서 Meta Ad Library는 VIDEO로 보여주는데 ADCatch는
+"cards가 2개 이상이면 무조건 CAROUSEL"이라는 구조 전용 규칙 때문에 CAROUSEL로 저장하고 있었다.
+이 규칙을 폐기하고 `app.services.ad_library_collector._classify_media()`를 아래 우선순위로
+재설계했다:
+1. `_raw_display_format()`(item 또는 snapshot의 `display_format`/`displayFormat`, 대소문자
+   무시하고 정규화)이 명시적으로 `"VIDEO"`이고 `snapshot.videos[]`/`snapshot.cards[]` 어디에서든
+   유효한 video URL을 하나 이상 찾을 수 있으면 → `VIDEO`. 카드가 몇 개든 상관없다 — 바로 이
+   케이스가 1411948807546506류(영상 광고를 cards 배열로 감싸 내려주는 경우)다. 유효한 video
+   URL을 못 찾으면(메타데이터 불일치) 아래 4번 구조 기반 fallback으로 내려간다.
+2. `"DCO"`(Dynamic Creative Optimization)는 CAROUSEL과 동일시하지 않는다 — DCO의 `cards`는
+   실제 슬라이드가 아니라 dynamic creative variant일 수 있다. video asset이 있으면 대표
+   format=`VIDEO`(첫 유효 video asset을 대표 `video_url`로), 없으면 대표 format=`IMAGE`. 어느
+   쪽이든 원본 variant 구조는 `media_items`에 그대로 보존한다.
+3. `"CAROUSEL"`/`"MULTI_IMAGES"`/`"DPA"` 중 하나이고 실제로 `cards`가 2개 이상 있으면(=진짜
+   여러 장 구조) → `CAROUSEL`로 유지. cards가 2개 미만이면(구조가 claim과 안 맞음) 4번으로.
+4. display_format이 없거나 위 어느 값에도 해당하지 않으면(알 수 없는 값 포함) — 기존 구조 기반
+   fallback: `snapshot.videos`에 유효 video URL이 있으면 `VIDEO`; `cards`가 정확히 1개이고
+   video URL이 있으면 `VIDEO`(Apify가 단일 영상 광고를 카드 1개짜리 배열로 감싸는 케이스); 그 외
+   cards가 있으면(2개 이상, 또는 1개인데 영상이 없으면 IMAGE) `CAROUSEL`; `images`만 있으면
    `IMAGE`.
-4. `snapshot.images`만 있으면 → `IMAGE`.
 
-**진단 로깅(`app.services.ad_library_collector._log_media_classification`, 2026-09 추가)**: 매
-분류마다 `ad_archive_id`/`raw_display_format`(item 또는 snapshot의 `display_format`/
-`displayFormat` 키 — 존재하면 그대로 기록, 없으면 `"absent"`)/`videos_count`/`cards_count`/
+카드/영상 노드의 대표 poster 이미지는 `video_preview_image_url → original_image_url →
+resized_image_url` 우선순위로 찾는다(과거에는 카드 poster 후보에 `video_preview_image_url`이
+아예 없어 영상 URL은 있는데 대표 `image_url`이 `None`이 되는 케이스가 있었다).
+
+**여전히 검증되지 않은 부분**: 이 저장소에는 APIFY_TOKEN/.env가 없어(2026-09-22 재확인)
+1411948807546506의 실제 raw item을 직접 조회하지 못했다. 위 `VIDEO`/`CAROUSEL`/`MULTI_IMAGES`/
+`DPA`/`DCO` 값 집합은 이번 요청에서 사용자가 직접 지정한 분류 규칙이며, 실제 Apify 응답
+필드명/값과 정확히 일치하는지는 아래 진단 로깅으로 재검증이 필요하다.
+
+**진단 로깅(`app.services.ad_library_collector._log_media_classification`)**: 매 분류마다
+`ad_archive_id`/`raw_display_format`(없으면 `"absent"`)/`videos_count`/`cards_count`/
 `images_count`/`card_video_count`/`unique_video_url_count`/`classified_format`/
-`classification_reason`을 structured log로 남긴다(URL 원문은 남기지 않음). **raw
-`display_format` 신호는 아직 분류 규칙에 반영하지 않았다** — 이 저장소에는 실제 Apify raw
-response 샘플이나 APIFY_TOKEN이 없어(2026-09 확인) 이 필드가 실제로 존재하는지, 어떤 값을
-갖는지 검증할 방법이 없었기 때문이다. 운영 환경에서 이 로그를 확인한 뒤 다음 라운드에서 근거를
-갖고 우선순위 규칙을 정한다(추측성 heuristic 추가 금지 원칙).
+`classification_reason`을 structured log로 남긴다(URL 원문은 남기지 않음). `classification_reason`
+값 목록: `display_format_video`/`dco_video_asset`/`dco_image_only`/`display_format_carousel`
+(위 1~3번 규칙이 매치된 경우) / `videos_present`/`single_card_video`/`single_card_image`/
+`single_card_empty`/`multi_cards_fallback`/`images_present`/`no_media`(4번 구조 기반 fallback).
 
-**기존(이 필드들이 생기기 전, 또는 이전 규칙으로 잘못 판정됐던) 소재의 backfill/교정**: 별도
-백필 스크립트를 두지 않는다. 다음 수집에서 그 소재가 다시 발견될 때
+**기존(이전 규칙으로 잘못 판정됐던, 또는 signed URL이 만료됐을 수 있는) 소재의 backfill/교정**:
+별도 백필 스크립트를 두지 않는다. 다음 수집에서 그 소재가 다시 발견될 때
 (`ad_sync.synchronize_ad_status`의 기존 소재 재발견 분기):
-- `video_url`/`media_items`가 비어 있으면 채운다(이미 있는 값은 덮어쓰지 않음).
 - **fresh raw evidence(`item.video_url` 또는 `item.media_items`가 비어있지 않음)가 명확하고
-  `item.format != existing.format`이면 `existing.format`을 최신 판정으로 교정한다.** 예:
-  과거 `CAROUSEL`로 저장됐던 소재가 새 규칙(3번)으로 `VIDEO`라고 재판정되면 DB의 `format`도
-  `VIDEO`로 바로잡는다. raw evidence가 비어있거나 불확실하면(빈 snapshot 등) 절대 덮어쓰지 않는다.
-- format이 `VIDEO`로 교정되고 아직 성공적으로 캐싱된 `keyframe_urls`가 없으면
-  `keyframe_status=PENDING`(+retry_count/error 초기화)으로 되돌려 keyframe pending 배치 대상에
-  넣는다. 이미 `SUCCESS`인 keyframe은 불필요하게 초기화하지 않는다.
+  `item.format != existing.format`이면 `existing.format`을 최신 판정으로 교정한다.** raw
+  evidence가 비어있거나 불확실하면(빈 snapshot 등) 절대 덮어쓰지 않는다.
+- `media_items`는 항상 fresh 값으로 refresh된다(ephemeral Meta CDN 메타데이터이므로 "한 번
+  채워지면 끝"이 아니다).
+- `video_url`은 format이 (교정 후 기준으로) `VIDEO`인 동안 fresh 수집마다 최신 signed URL로
+  **항상 refresh**된다 — 예전에는 "한 번 채워지면 절대 덮어쓰지 않는다"였지만, signed URL은
+  시간이 지나면 만료될 수 있으므로 이 가정을 폐기했다. format이 더 이상 VIDEO가 아니면 이
+  필드는 건드리지 않는다(과거 값 보존, destructive clear 없음).
+- keyframe 재활성화: format이 VIDEO이고 아직 성공적으로 캐싱된 keyframe이 없는 상태에서
+  (a) 방금 VIDEO로 새로 교정됐거나, (b) 기존에 `PENDING`/`FAILED`였는데 signed `video_url`이
+  실제로 달라졌으면(만료된 URL 때문에 반복 실패했을 가능성) → `keyframe_status=PENDING`,
+  `keyframe_retry_count=0`, `keyframe_error=NULL`로 되돌려 최신 URL로 재시도 가능하게 만든다.
+  **이미 `SUCCESS`이고 정상 `keyframe_urls`가 있으면 source URL 변경만으로 삭제/재생성하지
+  않는다.**
 - `VIDEO → CAROUSEL/IMAGE` 방향 교정도 동일 원칙으로 처리하되, 이미 Storage에 업로드된
   keyframe 파일을 지우는 destructive cleanup은 하지 않는다 — `keyframe_urls` 배열은 보존하고
   `keyframe_status`만 `NOT_APPLICABLE`로 되돌린다.
+- `image_url`(대표 썸네일)은 기존에 비어 있었거나, 이번에 format이 실제로 교정된 경우에
+  backfill/refresh된다. format이 안 바뀌었는데 이미 값이 있으면 덮어쓰지 않는다(Storage에 이미
+  캐싱된 공개 URL이라 계속 유효하므로). Gemini 재태깅 없이 캐싱만 수행하는
+  `media.cache_thumbnail_only()`를 쓴다(재발견마다 동기 Gemini 호출을 하면 Core Collection
+  latency와 Gemini quota에 영향을 준다) — `app.services.ad_sync`가 이 캐싱을 신규 소재
+  enrichment와 동일한 ThreadPoolExecutor 패턴으로 동시 처리한다.
 
 ## 11. 기간(주간) 조회 API의 `NO_RECORD` 해석 원칙 (2026-09)
 

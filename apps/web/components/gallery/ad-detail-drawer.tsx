@@ -102,14 +102,14 @@ function CampaignTagSection({
   );
 }
 
-// §3-5 — VIDEO인데 keyframe이 없으면 그냥 대표 이미지 한 장만 보여주고 끝내지 않는다. 상태를
-// 명확히 알려준다. SUCCESS인데 urls가 비어 있는 모순 상태도 디버깅 가능하게 남긴다(조용히
-// PENDING인 척하지 않는다).
+// §VIDEO PREVIEW/KEY VISUAL — VIDEO는 항상 대표 영상 썸네일을 먼저 보여주고(▶ 표시), 그 아래에
+// keyframe이 있으면 "KEY VISUAL" 2x2 grid를 추가로 보여준다(대표 썸네일을 keyframe으로 대체하지
+// 않는다 — 둘 다 함께 노출). PENDING/FAILED는 대표 썸네일은 정상 표시하고 상태 캡션만 붙인다.
 function videoKeyframeStatusCaption(ad: DrawerAd): string | null {
   if (ad.format !== "VIDEO") return null;
   if (ad.keyframe_urls.length > 0) return null;
   if (ad.keyframe_status === "PENDING") return "영상 장면 추출 대기 중";
-  if (ad.keyframe_status === "FAILED") return "영상 장면 추출에 실패해 대표 이미지로 표시하고 있습니다.";
+  if (ad.keyframe_status === "FAILED") return "영상 장면 추출 실패";
   if (ad.keyframe_status === "SUCCESS") {
     // 모순 상태(SUCCESS인데 urls 없음) — 조용히 넘기지 않고 원인을 알 수 있게 남긴다.
     return "영상 장면 정보를 불러오지 못했습니다(대표 이미지로 표시 중).";
@@ -117,40 +117,46 @@ function videoKeyframeStatusCaption(ad: DrawerAd): string | null {
   return null; // NOT_APPLICABLE — VIDEO인데 이 값이면 데이터 정합성 문제지만, UI는 조용히 대표 이미지로 폴백.
 }
 
-function MediaDetail({ ad }: { ad: DrawerAd }) {
+function VideoMedia({ ad }: { ad: DrawerAd }) {
   const keyframeCaption = videoKeyframeStatusCaption(ad);
-
-  // VIDEO — keyframe이 캐싱돼 있으면 2x2 grid, 없으면(PENDING/FAILED/모순 상태) 기존 단일
-  // preview로 fallback하되 상태 캡션을 함께 보여준다.
-  if (ad.format === "VIDEO" && ad.keyframe_urls.length > 0) {
-    return (
-      <div className="grid grid-cols-2 gap-1.5">
-        {ad.keyframe_urls.slice(0, 4).map((url, i) => (
+  return (
+    <div className="space-y-2">
+      <div className="relative flex aspect-[4/5] items-center justify-center overflow-hidden rounded-xl bg-slate-50">
+        {ad.image_url ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img key={i} src={url} alt={`장면 ${i + 1}`} className="aspect-square w-full rounded-lg object-cover" />
-        ))}
+          <img
+            src={ad.image_url}
+            alt={ad.copy_text ?? "ad creative"}
+            className="h-full w-full object-contain"
+          />
+        ) : (
+          <span className="text-xs text-muted">미디어 없음</span>
+        )}
+        <span className="absolute bottom-2 left-2 flex h-8 w-8 items-center justify-center rounded-full bg-foreground/70 text-sm text-white">
+          ▶
+        </span>
       </div>
-    );
-  }
-
-  if (ad.format === "VIDEO") {
-    return (
-      <div>
-        <div className="flex aspect-[4/5] items-center justify-center rounded-xl bg-slate-50">
-          {ad.image_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={ad.image_url}
-              alt={ad.copy_text ?? "ad creative"}
-              className="h-full w-full rounded-xl object-contain"
-            />
-          ) : (
-            <span className="text-xs text-muted">미디어 없음</span>
-          )}
+      {keyframeCaption && <p className="text-center text-xs text-muted">{keyframeCaption}</p>}
+      {ad.keyframe_urls.length > 0 && (
+        <div>
+          <p className="text-xs font-semibold text-muted">KEY VISUAL</p>
+          {/* keyframe들은 같은 영상에서 나온 동일 비율 프레임이므로 aspect-square+object-cover로
+              강제 crop하지 않는다 — 9:16 세로형 영상의 상단/하단 자막이 잘리는 걸 방지한다. */}
+          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+            {ad.keyframe_urls.slice(0, 4).map((url, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img key={i} src={url} alt={`장면 ${i + 1}`} className="w-full rounded-lg object-contain" />
+            ))}
+          </div>
         </div>
-        {keyframeCaption && <p className="mt-1.5 text-center text-xs text-muted">{keyframeCaption}</p>}
-      </div>
-    );
+      )}
+    </div>
+  );
+}
+
+function MediaDetail({ ad }: { ad: DrawerAd }) {
+  if (ad.format === "VIDEO") {
+    return <VideoMedia ad={ad} />;
   }
 
   // CAROUSEL — 카드 구성을 그대로 보여준다(영상 포함 카드는 ▶ 오버레이). 재생 인터랙션은 없음 —
