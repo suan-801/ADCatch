@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
+import type { ProjectAdsFilterParams } from "@/lib/api";
 import type { Ad, AdChangesRangeResponse, AdChangesResponse, DashboardMetrics } from "@/lib/types";
 import { todayKst } from "@/lib/types";
 import { useProjectContext } from "@/lib/project-context";
@@ -10,14 +11,25 @@ import { CompetitorPanel } from "@/components/competitor-panel";
 import { CompetitorFilter } from "@/components/daily-changes/competitor-filter";
 import { WeekNav, weekRangeOf } from "@/components/daily-changes/week-nav";
 import { TodayCatch } from "@/components/today-catch";
-import { VisualFormatChart } from "@/components/visual-format-chart";
+import { VisualPatternPanel } from "@/components/dashboard/visual-pattern-panel";
 import { PeriodChangesPanel } from "@/components/dashboard/period-changes-panel";
 import { CampaignMixChart } from "@/components/dashboard/campaign-mix-chart";
 import { AdGallery } from "@/components/gallery/ad-gallery";
-import { GalleryFilters, DEFAULT_GALLERY_FILTERS, applyGalleryFilters } from "@/components/gallery/gallery-filters";
+import { GalleryFilters, DEFAULT_GALLERY_FILTERS, type GalleryFilterState } from "@/components/gallery/gallery-filters";
 import { AdDetailDrawer } from "@/components/gallery/ad-detail-drawer";
 import { MascotWidget } from "@/components/mascot-widget";
 import { BaselineCTA } from "@/components/baseline-cta";
+
+function filtersToParams(f: GalleryFilterState): ProjectAdsFilterParams {
+  return {
+    competitorId: f.competitorId !== "ALL" ? f.competitorId : undefined,
+    status: f.status !== "ALL" ? f.status : undefined,
+    format: f.format !== "ALL" ? f.format : undefined,
+    visualType: f.visual !== "ALL" ? f.visual : undefined,
+    campaignTagId: f.campaignTagId !== "ALL" ? f.campaignTagId : undefined,
+    search: f.search.trim() || undefined,
+  };
+}
 
 // §9 분석 중심 재편: ① 비주얼 패턴 요약 ② 기간별 광고 변화(주간 기본) ③ 캠페인 태그 구성 비중
 // ④ 라이브 소재 갤러리 ⑤ 브랜드/수집 관리. 브랜드가 하나도 없는 새 프로젝트는 예외적으로 분석
@@ -36,13 +48,15 @@ export default function CurrentDashboardPage() {
   const [ads, setAds] = useState<(Ad & { competitor_name?: string })[]>([]);
   const [collecting, setCollecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [galleryFilters, setGalleryFilters] = useState(DEFAULT_GALLERY_FILTERS);
   const [selectedAd, setSelectedAd] = useState<(Ad & { competitor_name?: string }) | null>(null);
-  // §6 Gallery Lazy Load — 첫 진입 시 전체 Ad를 가져오지 않는다. 사용자가 "더 자세히 보기"를
-  // 눌렀을 때 최초 1회만 fetch하고, 그 뒤로는 같은 페이지 session 안에서 재사용한다(접기/열기 시
-  // 재요청하지 않음).
+  // §11/§12 Gallery — "필터 먼저 → 조회하기" 구조. galleryFilters는 아직 적용되지 않은 draft이고,
+  // appliedGalleryFilters는 마지막으로 실제 조회에 쓰인 필터(수집 후 refresh에 재사용). 3가지
+  // 상태를 구분한다: A) 한 번도 조회하지 않음(gallerySearched=false), B) 조회했으나 접힘
+  // (searched && !expanded), C) 펼쳐짐(searched && expanded) — A/B가 같은 UI로 보이던 문제를 고친다.
+  const [galleryFilters, setGalleryFilters] = useState<GalleryFilterState>(DEFAULT_GALLERY_FILTERS);
+  const [appliedGalleryFilters, setAppliedGalleryFilters] = useState<GalleryFilterState | null>(null);
+  const [gallerySearched, setGallerySearched] = useState(false);
   const [galleryExpanded, setGalleryExpanded] = useState(false);
-  const [galleryLoaded, setGalleryLoaded] = useState(false);
   const [galleryLoading, setGalleryLoading] = useState(false);
   // Initial Baseline + Daily Catch Opt-in UX — 방금 완료된 baseline 수집에 대한 CTA(있으면).
   const [baselineCta, setBaselineCta] = useState<{
@@ -67,8 +81,9 @@ export default function CurrentDashboardPage() {
   }, [projectId]);
 
   // §6 — 기간(주간) 조회. galleryCompetitorId(브랜드 필터)와 week(기간) 상태를 그대로 공유한다 —
-  // "지금 보고 있는 브랜드"의 기간별 변화를 함께 보여주는 것이 자연스럽다.
-  useEffect(() => {
+  // "지금 보고 있는 브랜드"의 기간별 변화를 함께 보여주는 것이 자연스럽다. 이 상태는 Gallery 자체의
+  // 브랜드 필터(galleryFilters.competitorId)와는 별개다(분석 섹션 스코프 vs 갤러리 조회 조건).
+  const refreshRange = () => {
     if (!projectId) return;
     api
       .getAdChangesRange(projectId, {
@@ -78,40 +93,40 @@ export default function CurrentDashboardPage() {
       })
       .then(setRange)
       .catch((e) => setError(String(e)));
+  };
+
+  useEffect(() => {
+    refreshRange();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, week, galleryCompetitorId]);
 
   // 브랜드가 하나도 없어지면(삭제 등) 갤러리 상태도 초기화한다 — 다음에 브랜드가 생기면 다시
-  // "더 자세히 보기"를 눌러야 fetch한다(자동으로 다시 불러오지 않음).
+  // "조회하기"를 눌러야 fetch한다(자동으로 다시 불러오지 않음).
   useEffect(() => {
     if (competitors.length === 0) {
       setAds([]);
-      setGalleryLoaded(false);
+      setGallerySearched(false);
       setGalleryExpanded(false);
+      setAppliedGalleryFilters(null);
     }
   }, [competitors]);
 
-  // §6 Gallery Lazy Load — "더 자세히 보기"를 눌렀을 때만(§13-1의 project-wide 엔드포인트를 그대로
-  // 재사용) 최초 1회 호출한다. 첫 dashboard 진입 시에는 이 API를 전혀 호출하지 않는다.
-  const handleToggleGallery = async () => {
-    if (galleryExpanded) {
-      setGalleryExpanded(false); // 카드 UI는 접어서 숨긴다 — ads state는 유지하므로 다시 열어도 재요청 없음
-      return;
-    }
-    if (!galleryLoaded) {
-      setGalleryLoading(true);
-      setError(null);
-      try {
-        const list = await api.listProjectAds(projectId);
-        setAds(list);
-        setGalleryLoaded(true);
-      } catch (e) {
-        setError(String(e));
-        setGalleryLoading(false);
-        return;
-      }
+  // §11/§12 Gallery — "조회하기" 버튼을 눌렀을 때만 서버에 질의한다(§13 query param 필터). filter
+  // 값을 바꾸는 것만으로는 절대 API 요청을 하지 않는다.
+  const handleSearchGallery = async () => {
+    setGalleryLoading(true);
+    setError(null);
+    try {
+      const list = await api.listProjectAds(projectId, filtersToParams(galleryFilters));
+      setAds(list);
+      setAppliedGalleryFilters(galleryFilters);
+      setGallerySearched(true);
+      setGalleryExpanded(true);
+    } catch (e) {
+      setError(String(e));
+    } finally {
       setGalleryLoading(false);
     }
-    setGalleryExpanded(true);
   };
 
   const handleCreateCompetitor = async (payload: { name: string; ad_library_url: string }) => {
@@ -128,12 +143,13 @@ export default function CurrentDashboardPage() {
     setError(null);
     try {
       const result = await api.collectNow(competitorId);
-      // §6-4: 상단 분석(metrics/range/freshness)은 항상 최신화하되, 사용자가 갤러리를 아직 열지
-      // 않았다면 전체 Ad fetch는 하지 않는다.
+      // §6-4: 상단 분석(metrics/range/freshness)은 항상 최신화하되, 사용자가 갤러리를 아직 조회하지
+      // 않았다면 전체 Ad fetch는 하지 않는다. 이미 조회했다면 마지막으로 적용한 필터 그대로 재조회한다.
       await refreshDashboard();
-      if (galleryLoaded) {
+      refreshRange();
+      if (gallerySearched && appliedGalleryFilters) {
         await api
-          .listProjectAds(projectId)
+          .listProjectAds(projectId, filtersToParams(appliedGalleryFilters))
           .then(setAds)
           .catch(() => {});
       }
@@ -160,8 +176,6 @@ export default function CurrentDashboardPage() {
     setAds((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
     setSelectedAd((prev) => (prev && prev.id === updated.id ? { ...prev, ...updated } : prev));
   };
-
-  const filteredAds = applyGalleryFilters(ads, galleryFilters);
 
   const todayStartedCount = (todayChanges?.summary.started ?? 0) + (todayChanges?.summary.reactivated ?? 0);
 
@@ -234,17 +248,16 @@ export default function CurrentDashboardPage() {
             <CompetitorFilter competitors={competitors} selectedId={galleryCompetitorId} onSelect={setGalleryCompetitorId} />
           </div>
 
-          {range && (
-            <section className="max-w-sm">
-              <VisualFormatChart ratio={range.visual_pattern} title="비주얼 패턴" />
-            </section>
-          )}
+          {/* §2/§3 — 비주얼 패턴은 STARTED/REACTIVATED 이벤트가 아니라 "선택 기간에 실제로
+              라이브였던 광고"(AdObservation 기준) 전체를 분모로 삼는다(docs/DATA_SEMANTICS.md §11). */}
+          {range && <VisualPatternPanel projectId={projectId} range={range} onProcessed={refreshRange} />}
 
-          {range && (
-            <PeriodChangesPanel projectId={projectId} range={range} competitorLabel={competitorLabel} />
-          )}
+          {range && <PeriodChangesPanel projectId={projectId} range={range} competitorLabel={competitorLabel} />}
 
-          {range && Object.keys(range.campaign_mix).length > 0 && (
+          {/* §4/§5 — 캠페인 패턴도 비주얼 패턴과 동일한 alive_ad_count 분모를 공유한다(절대 기준이
+              갈라지지 않게 한다). alive_ad_count>0이면 항상 무언가(태그/검토 필요/미분류)로
+              분류되므로, campaign_mix 존재 여부가 아니라 alive_ad_count로 렌더링 여부를 결정한다. */}
+          {range && range.alive_ad_count > 0 && (
             <section className="max-w-sm">
               <CampaignMixChart mix={range.campaign_mix} campaignTags={campaignTags} />
             </section>
@@ -252,61 +265,60 @@ export default function CurrentDashboardPage() {
 
           <section>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              {/* B-07: 필터가 걸려있으면 "필터결과 / 전체"로, 아니면 전체 개수만 보여준다.
-                  §6 Gallery Lazy Load: 갤러리를 열기 전에는 전체 Ad row 없이도 DashboardMetrics의
-                  live_ad_count(SQL COUNT 기반, Gallery와 동일하게 is_archived=false 기준)로 개수를
-                  보여준다. */}
               <h2 className="text-lg font-bold text-foreground">
                 라이브 소재 갤러리{" "}
                 <span className="ml-1 text-sm font-medium text-muted">
-                  {galleryLoaded
-                    ? filteredAds.length === ads.length
-                      ? ads.length
-                      : `${filteredAds.length} / ${ads.length}`
-                    : (metrics?.live_ad_count ?? "")}
+                  {gallerySearched ? ads.length : (metrics?.live_ad_count ?? "")}
                 </span>
               </h2>
-              {galleryExpanded && (
+              {gallerySearched && (
                 <button
                   type="button"
-                  onClick={handleToggleGallery}
+                  onClick={() => setGalleryExpanded((prev) => !prev)}
                   className="text-xs font-semibold text-muted hover:text-foreground"
                 >
-                  접기 ↑
+                  {galleryExpanded ? "접기 ↑" : "펼치기 ↓"}
                 </button>
               )}
             </div>
 
-            {!galleryExpanded ? (
-              <div className="rounded-2xl border border-dashed border-border p-8 text-center">
-                <p className="text-sm text-muted">
-                  {metrics ? `현재 추적 소재 ${metrics.live_ad_count}개` : "불러오는 중..."}
-                  <br />
-                  필터를 이용해 전체 광고 소재를 확인할 수 있습니다.
-                </p>
+            {!gallerySearched && (
+              <p className="mb-3 text-xs text-muted">
+                {metrics ? `현재 추적 소재 ${metrics.live_ad_count}개` : "불러오는 중..."} — 필터를 먼저 선택하고
+                조회하기를 눌러주세요.
+              </p>
+            )}
+
+            {/* §11: A(한 번도 조회 안 함)와 C(조회 후 펼침)에서만 필터 폼을 보여준다. B(조회했으나
+                접힘)는 compact 헤더만 보이고 필터 폼/결과 그리드를 다시 보여주지 않는다. */}
+            {(!gallerySearched || galleryExpanded) && (
+              <>
+                <div className="mb-3">
+                  <GalleryFilters
+                    value={galleryFilters}
+                    onChange={setGalleryFilters}
+                    competitors={competitors}
+                    campaignTags={campaignTags}
+                  />
+                </div>
                 <button
                   type="button"
-                  onClick={handleToggleGallery}
+                  onClick={handleSearchGallery}
                   disabled={galleryLoading}
-                  className="mt-4 rounded-full bg-brand px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-60"
+                  className="mb-4 rounded-full bg-brand px-5 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-60"
                 >
-                  {galleryLoading ? "소재를 불러오는 중..." : "더 자세히 보기 ↓"}
+                  {galleryLoading ? "조회 중..." : "조회하기"}
                 </button>
-              </div>
-            ) : (
-              <>
-                {/* §6-5: 갤러리가 접혀 있을 때는 무거운 GalleryFilters를 아예 렌더링하지 않는다 —
-                    "더 자세히 보기" 이후에만 노출한다. */}
-                <div className="mb-4">
-                  <GalleryFilters value={galleryFilters} onChange={setGalleryFilters} campaignTags={campaignTags} />
-                </div>
-                <AdGallery
-                  ads={filteredAds}
-                  totalCount={ads.length}
-                  onCardClick={setSelectedAd}
-                  campaignTags={campaignTags}
-                />
               </>
+            )}
+
+            {gallerySearched && galleryExpanded && (
+              <AdGallery
+                ads={ads}
+                totalCount={metrics?.live_ad_count ?? 0}
+                onCardClick={setSelectedAd}
+                campaignTags={campaignTags}
+              />
             )}
           </section>
 

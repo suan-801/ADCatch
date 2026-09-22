@@ -46,6 +46,17 @@ export interface CampaignTagProcessPendingResult {
   pending_remaining: number;
 }
 
+// §9/§10 — 대시보드 "분석 업데이트"(Gemini Vision, visual_type) 버튼 결과. campaign-tags의
+// process-pending과 동일한 모양(needs_review 필드만 없음 — visual 분석은 SUCCESS/FAILED뿐).
+export interface VisualAnalysisProcessPendingResult {
+  processed: number;
+  succeeded: number;
+  still_pending: number;
+  failed: number;
+  quota_stopped: boolean;
+  pending_remaining: number;
+}
+
 // ── VIDEO/CAROUSEL 미디어 메타데이터 (additive) ─────────────────────────
 export interface MediaItem {
   type: "image" | "video";
@@ -264,10 +275,16 @@ export interface AdChangesRangeResponse {
   started_ads: ChangedAd[];
   reactivated_ads: ChangedAd[];
   stopped_ads: ChangedAd[];
-  // unique 광고 기준 집계(동일 광고가 STARTED+REACTIVATED를 모두 가져도 1회만 카운트).
-  visual_pattern: Partial<Record<VisualType, number>>;
-  // 캠페인 태그 id(string) 또는 "NEEDS_REVIEW"를 키로 사용 — 프로젝트의 캠페인 태그 목록과 join해
-  // 이름을 표시한다. 재분류 시 과거 기간 집계도 함께 바뀐다(현재 태그 분류 기준으로 항상 재계산).
+  // 2026-09 개정 — "선택 기간에 한 번이라도 실제 라이브로 관측된(AdObservation 기준) unique 광고
+  // 수". visual_pattern/campaign_mix 값의 합과 항상 같다. STARTED/REACTIVATED 이벤트가 없어도
+  // 계속 라이브였던 광고까지 포함한다(이전엔 이 광고들이 빠져 비주얼 패턴이 텅 비어 보였다).
+  alive_ad_count: number;
+  // alive_ad_count와 동일한 분모. visual_type이 없는 광고는 "UNANALYZED" 키로 명시한다(조용히
+  // 제외하지 않음 — VisualType 외 문자열 키가 있을 수 있어 Record<string, number>로 넓힌다).
+  visual_pattern: Record<string, number>;
+  // 캠페인 태그 id(string) 또는 "NEEDS_REVIEW"/"UNCLASSIFIED"를 키로 사용 — 프로젝트의 캠페인
+  // 태그 목록과 join해 이름을 표시한다. 재분류 시 과거 기간 집계도 함께 바뀐다(현재 태그 분류
+  // 기준으로 항상 재계산).
   campaign_mix: Record<string, number>;
 }
 

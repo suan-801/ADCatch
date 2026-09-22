@@ -4,7 +4,7 @@ from fastapi.responses import JSONResponse
 
 from app.config import settings
 from app.database import Base, engine
-from app.routers import ad_changes, ads, auth, campaign_tags, competitors, dashboard, projects
+from app.routers import ad_changes, ads, auth, campaign_tags, competitors, dashboard, projects, visual_analysis
 from app.routers.ads import ad_detail_router, project_ads_router
 from app.routers.campaign_tags import tag_detail_router
 
@@ -48,6 +48,7 @@ app.include_router(dashboard.router)
 app.include_router(ad_changes.router)
 app.include_router(campaign_tags.router)
 app.include_router(tag_detail_router)
+app.include_router(visual_analysis.router)
 
 
 @app.on_event("startup")

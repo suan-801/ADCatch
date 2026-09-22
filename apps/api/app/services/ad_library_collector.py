@@ -6,6 +6,7 @@ reference/marketing-os-course/02_competitor/_scripts/fetch_competitor_ads.py 의
 NEW/ACTIVE/INACTIVE 상태 추적은 이 레퍼런스에 없던 부분이라 app.services.ad_sync 에서 새로 구현한다.
 """
 
+import logging
 import time
 from datetime import datetime
 
@@ -16,6 +17,8 @@ from app.schemas import AdFormat, MediaItem, RawAdItem
 from app.services.timing import stage_timer
 
 APIFY_API_BASE = "https://api.apify.com/v2"
+
+media_classification_logger = logging.getLogger("adcatcher.media_classification")
 
 
 class ApifyRunError(RuntimeError):
@@ -61,9 +64,62 @@ def get_dataset_items(dataset_id: str) -> list[dict]:
     return resp.json()
 
 
-def classify_and_extract_media(item: dict) -> tuple[AdFormat, str | None, str | None, list[MediaItem]]:
-    """Apify 아이템의 snapshot에서 포맷(IMAGE/VIDEO/CAROUSEL), 대표 썸네일 URL, 대표 영상 URL,
-    미디어 원본 구조(media_items)를 판별한다.
+def _raw_display_format(item: dict) -> str | None:
+    """Meta/Apify가 원본 포맷 신호(display_format/displayFormat 등)를 item 최상위 또는
+    snapshot 아래에 내려주는지 확인한다. 2026-09 기준 이 저장소는 실제 Apify raw response
+    샘플이나 APIFY_TOKEN이 없어(§14/§16) 이 필드가 실제로 존재하는지, 존재한다면 어떤 값들을
+    갖는지 검증하지 못했다 — 그래서 이 값을 아직 분류 규칙에 반영하지 않고, 진단 로그(§15)에만
+    실어서 실제 운영 데이터로 확인할 수 있게 해둔다."""
+    snap = item.get("snapshot") or {}
+    for key in ("display_format", "displayFormat"):
+        value = item.get(key) or snap.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def _log_media_classification(
+    item: dict,
+    ad_archive_id: str | None,
+    classified_format: AdFormat,
+    classification_reason: str,
+) -> None:
+    """§15 — 실제 운영 raw structure를 확인하기 위한 진단 로그. URL 전체는 남기지 않고
+    count/format/근거만 기록한다(민감 정보 최소화)."""
+    snap = item.get("snapshot") or {}
+    videos = snap.get("videos") or []
+    images = snap.get("images") or []
+    cards = snap.get("cards") or []
+
+    card_video_count = sum(1 for c in cards if c.get("video_hd_url") or c.get("video_sd_url"))
+    unique_video_urls: set[str] = set()
+    for v in videos:
+        u = v.get("video_hd_url") or v.get("video_sd_url")
+        if u:
+            unique_video_urls.add(u)
+    for c in cards:
+        u = c.get("video_hd_url") or c.get("video_sd_url")
+        if u:
+            unique_video_urls.add(u)
+
+    media_classification_logger.info(
+        "stage=media_classification ad_archive_id=%s raw_display_format=%s videos_count=%d cards_count=%d "
+        "images_count=%d card_video_count=%d unique_video_url_count=%d classified_format=%s classification_reason=%s",
+        ad_archive_id or item.get("ad_archive_id") or "unknown",
+        _raw_display_format(item) or "absent",
+        len(videos),
+        len(cards),
+        len(images),
+        card_video_count,
+        len(unique_video_urls),
+        classified_format.value,
+        classification_reason,
+    )
+
+
+def _classify_media(item: dict) -> tuple[AdFormat, str | None, str | None, list[MediaItem], str]:
+    """classify_and_extract_media()의 순수 판별 로직. classification_reason(진단 로그용, §15)을
+    5번째 값으로 함께 반환한다.
 
     reference/marketing-os-course/02_competitor/_scripts/fetch_competitor_ads.py::classify_and_extract()
     의 검증된 로직(videos 전체 순회, video_hd_url 우선 SD fallback, 카드 내부 영상 처리)을
@@ -82,9 +138,10 @@ def classify_and_extract_media(item: dict) -> tuple[AdFormat, str | None, str | 
       D. 카드가 1개이고 영상 URL이 없으면(순수 이미지 카드 1장) → IMAGE.
       E. `snapshot.images`만 있으면 → IMAGE.
 
-    이 저장소에는 실제 Apify raw response 샘플이나 APIFY_TOKEN이 없어(2026-09 확인) 라이브
-    재검증은 하지 못했다 — reference 구현 + 테스트 fixture 근거로 이식했고, 실제 운영 데이터로
-    재검증이 필요하다(구현 보고서의 "남은 제한사항" 참고).
+    **raw display_format 신호는 아직 이 규칙에 반영하지 않는다(§16)** — 실제 Apify 응답에 이
+    필드가 존재하는지, 값이 무엇인지 검증할 방법이 이 환경에 없어서 무리하게 우선순위 규칙을
+    추가하지 않았다. `_log_media_classification()`이 매 분류마다 raw_display_format을 함께
+    기록하므로, 운영 로그를 확인한 뒤 다음 라운드에서 근거를 갖고 규칙을 정할 수 있다.
     """
     snap = item.get("snapshot") or {}
     videos = snap.get("videos") or []
@@ -105,7 +162,7 @@ def classify_and_extract_media(item: dict) -> tuple[AdFormat, str | None, str | 
             for v in videos
             if v.get("video_hd_url") or v.get("video_sd_url")
         ]
-        return AdFormat.VIDEO, representative_image_url, video_url, media_items
+        return AdFormat.VIDEO, representative_image_url, video_url, media_items, "videos_present"
 
     if len(cards) == 1:
         # 규칙 C/D — 카드가 1개뿐이면 "여러 장을 넘겨보는 캐러셀"의 실제 의미가 없다. Apify가
@@ -116,10 +173,16 @@ def classify_and_extract_media(item: dict) -> tuple[AdFormat, str | None, str | 
         card_image_url = card.get("original_image_url") or card.get("resized_image_url")
         if card_video_url:
             media_items = [MediaItem(type="video", url=card_video_url, preview_url=card_image_url)]
-            return AdFormat.VIDEO, card_image_url, card_video_url, media_items
+            return AdFormat.VIDEO, card_image_url, card_video_url, media_items, "single_card_video"
         if card_image_url:
-            return AdFormat.IMAGE, card_image_url, None, [MediaItem(type="image", url=card_image_url)]
-        return AdFormat.IMAGE, None, None, []
+            return (
+                AdFormat.IMAGE,
+                card_image_url,
+                None,
+                [MediaItem(type="image", url=card_image_url)],
+                "single_card_image",
+            )
+        return AdFormat.IMAGE, None, None, [], "single_card_empty"
 
     if cards:
         media_items = []
@@ -140,7 +203,7 @@ def classify_and_extract_media(item: dict) -> tuple[AdFormat, str | None, str | 
         # CAROUSEL은 카드 안에 영상이 섞여 있어도(카드 2개 이상일 때) 포맷이 절대 VIDEO로 바뀌지
         # 않는다. 카드 내부 영상의 다운로드/keyframe 캐싱은 이번 범위 밖(§8) — Drawer는 preview_url을
         # 그대로 보여준다.
-        return AdFormat.CAROUSEL, representative_image_url, None, media_items
+        return AdFormat.CAROUSEL, representative_image_url, None, media_items, "multi_cards_fallback"
 
     if images:
         media_items = [
@@ -150,9 +213,21 @@ def classify_and_extract_media(item: dict) -> tuple[AdFormat, str | None, str | 
         ]
         img = images[0]
         representative_image_url = img.get("original_image_url") or img.get("resized_image_url")
-        return AdFormat.IMAGE, representative_image_url, None, media_items
+        return AdFormat.IMAGE, representative_image_url, None, media_items, "images_present"
 
-    return AdFormat.IMAGE, None, None, []
+    return AdFormat.IMAGE, None, None, [], "no_media"
+
+
+def classify_and_extract_media(
+    item: dict, ad_archive_id: str | None = None
+) -> tuple[AdFormat, str | None, str | None, list[MediaItem]]:
+    """Apify 아이템의 snapshot에서 포맷(IMAGE/VIDEO/CAROUSEL), 대표 썸네일 URL, 대표 영상 URL,
+    미디어 원본 구조(media_items)를 판별한다. 판별 규칙은 _classify_media()를 참고. 매 호출마다
+    진단 로그(§15)를 남긴다 — ad_archive_id는 parse_items()가 이미 알고 있는 값을 그대로
+    넘겨받는다(없으면 item 자체에서 재시도)."""
+    fmt, image_url, video_url, media_items, reason = _classify_media(item)
+    _log_media_classification(item, ad_archive_id, fmt, reason)
+    return fmt, image_url, video_url, media_items
 
 
 def _extract_caption(item: dict) -> str | None:
@@ -172,7 +247,7 @@ def parse_items(items: list[dict], page_id: str) -> list[RawAdItem]:
         ad_archive_id = str(item.get("ad_archive_id") or item.get("adArchiveID") or item.get("id") or "")
         if not ad_archive_id:
             continue
-        fmt, image_url, video_url, media_items = classify_and_extract_media(item)
+        fmt, image_url, video_url, media_items = classify_and_extract_media(item, ad_archive_id=ad_archive_id)
         start_ts = snap.get("creation_time") or item.get("start_date")
         start_date = datetime.fromtimestamp(int(start_ts)) if start_ts else None
         parsed.append(

@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Ad
+from app.models import Ad, Competitor
 from app.services import vision_tagging
 from app.services.timing import stage_timer
 
@@ -58,6 +58,7 @@ def process_pending_analysis(
     db: Session,
     *,
     competitor_id: uuid.UUID | None = None,
+    project_id: uuid.UUID | None = None,
     limit: int | None = None,
 ) -> PendingAnalysisSummary:
     """PENDING 소재를 oldest-first로 골라 Gemini 재분석을 재시도한다.
@@ -67,12 +68,16 @@ def process_pending_analysis(
       이 소재를 포함한 나머지는 PENDING 그대로 유지된다(재시도 횟수도 늘리지 않는다).
     - 그 외 실패: analysis_retry_count += 1, analysis_error 갱신. 임계값(gemini_analysis_max_retries)
       초과 시 analysis_status=FAILED로 확정한다.
-    """
+
+    project_id를 넘기면 그 프로젝트 소속 경쟁사의 소재만 대상으로 한다(대시보드의 "분석 업데이트"
+    버튼 — 다른 프로젝트의 PENDING 소재가 함께 처리되면 안 된다)."""
     batch_limit = limit if limit is not None else settings.gemini_pending_batch_size
 
     query = select(Ad).where(Ad.analysis_status == "PENDING", Ad.image_url.is_not(None))
     if competitor_id is not None:
         query = query.where(Ad.competitor_id == competitor_id)
+    if project_id is not None:
+        query = query.where(Ad.competitor_id.in_(select(Competitor.id).where(Competitor.project_id == project_id)))
     query = query.order_by(Ad.first_seen_at.asc()).limit(batch_limit)
 
     pending_ads = db.scalars(query).all()

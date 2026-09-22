@@ -1,8 +1,13 @@
-import type { Ad, AdFormat, AdStatus, CampaignTag, VisualType } from "@/lib/types";
+import type { Ad, AdFormat, AdStatus, CampaignTag, Competitor, VisualType } from "@/lib/types";
 
-// Part B — Gallery Filters. Brand 필터(기존 CompetitorFilter)는 그대로 유지하고, 이 컴포넌트는
-// Status/Format/Visual/캠페인 태그/카피 검색만 추가로 담당한다. "70% 업무 툴" 톤을 유지하기 위해
-// select dropdown 위주로 구성하고 pill을 남발하지 않는다.
+// Part B — Gallery Filters. "70% 업무 툴" 톤을 유지하기 위해 select dropdown 위주로 구성하고
+// pill을 남발하지 않는다.
+//
+// §11/§12(2026-09): "필터 먼저 → 조회하기" 구조로 바뀌었다 — 이 컴포넌트는 필터 draft 상태만
+// 관리하고, 실제 API 호출은 부모(page.tsx)가 "조회하기" 버튼을 눌렀을 때만 트리거한다(filter
+// change 자체는 API 요청을 발생시키지 않는다). 서버가 실제 필터링을 담당하므로(§13,
+// GET /projects/{id}/ads의 query param), applyGalleryFilters()는 더 이상 주요 경로가 아니지만
+// 순수 함수라 테스트/다른 화면에서 재사용할 수 있게 남겨둔다.
 
 export type StatusFilterValue = "ALL" | AdStatus;
 export type FormatFilterValue = "ALL" | AdFormat;
@@ -11,6 +16,7 @@ export type VisualFilterValue = "ALL" | VisualType | "UNANALYZED";
 export type CampaignTagFilterValue = "ALL" | "NEEDS_REVIEW" | string;
 
 export interface GalleryFilterState {
+  competitorId: string | "ALL";
   status: StatusFilterValue;
   format: FormatFilterValue;
   visual: VisualFilterValue;
@@ -19,6 +25,7 @@ export interface GalleryFilterState {
 }
 
 export const DEFAULT_GALLERY_FILTERS: GalleryFilterState = {
+  competitorId: "ALL",
   status: "ALL",
   format: "ALL",
   visual: "ALL",
@@ -28,6 +35,7 @@ export const DEFAULT_GALLERY_FILTERS: GalleryFilterState = {
 
 export function isGalleryFilterActive(filters: GalleryFilterState): boolean {
   return (
+    filters.competitorId !== "ALL" ||
     filters.status !== "ALL" ||
     filters.format !== "ALL" ||
     filters.visual !== "ALL" ||
@@ -36,9 +44,11 @@ export function isGalleryFilterActive(filters: GalleryFilterState): boolean {
   );
 }
 
+/** 서버 사이드 필터(§13)가 주요 경로다 — 이 함수는 순수 함수 유틸로 남겨둔다(테스트/재사용용). */
 export function applyGalleryFilters<T extends Ad>(ads: T[], filters: GalleryFilterState): T[] {
   const q = filters.search.trim().toLowerCase();
   return ads.filter((ad) => {
+    if (filters.competitorId !== "ALL" && ad.competitor_id !== filters.competitorId) return false;
     if (filters.status !== "ALL" && ad.status !== filters.status) return false;
     if (filters.format !== "ALL" && ad.format !== filters.format) return false;
     if (filters.visual === "UNANALYZED") {
@@ -88,16 +98,33 @@ const selectClass =
 export function GalleryFilters({
   value,
   onChange,
+  competitors = [],
   campaignTags = [],
 }: {
   value: GalleryFilterState;
   onChange: (next: GalleryFilterState) => void;
+  /** 브랜드 필터 드롭다운 옵션. */
+  competitors?: Competitor[];
   /** 캠페인 태그 필터 드롭다운 옵션 — 없으면(프로젝트에 태그가 없으면) 필터 자체를 숨긴다. */
   campaignTags?: CampaignTag[];
 }) {
   const activeCampaignTags = campaignTags.filter((t) => t.is_active);
   return (
     <div className="flex flex-wrap items-center gap-2">
+      <select
+        value={value.competitorId}
+        onChange={(e) => onChange({ ...value, competitorId: e.target.value })}
+        className={selectClass}
+        aria-label="브랜드 필터"
+      >
+        <option value="ALL">브랜드: 전체</option>
+        {competitors.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+
       <select
         value={value.status}
         onChange={(e) => onChange({ ...value, status: e.target.value as StatusFilterValue })}

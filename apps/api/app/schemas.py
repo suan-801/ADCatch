@@ -190,6 +190,22 @@ class CampaignTagProcessPendingResult(BaseModel):
     pending_remaining: int
 
 
+class VisualAnalysisProcessPendingRequest(BaseModel):
+    limit: int | None = None
+
+
+class VisualAnalysisProcessPendingResult(BaseModel):
+    """§9/§10 — 대시보드 "분석 업데이트" 버튼. campaign-tags의 process-pending과 동일한 UX 원칙
+    (bounded batch, project 스코프, quota graceful stop)을 재사용한다."""
+
+    processed: int
+    succeeded: int
+    still_pending: int
+    failed: int
+    quota_stopped: bool
+    pending_remaining: int
+
+
 class AdCampaignTagUpdate(BaseModel):
     campaign_tag_id: uuid.UUID
 
@@ -415,12 +431,17 @@ class AdChangesRangeResponse(BaseModel):
     started_ads: list[ChangedAdOut]
     reactivated_ads: list[ChangedAdOut]
     stopped_ads: list[ChangedAdOut]
-    # unique 광고 기준 집계(§6-1) — 동일 광고가 기간 내 STARTED+REACTIVATED를 모두 가져도 1회만
-    # 카운트한다. 변화 목록(started_ads 등)은 event 기준으로 dedupe하지 않는다.
+    # 2026-09 개정 — "선택 기간에 한 번이라도 실제 라이브로 관측된(AdObservation 기준) unique 광고
+    # 수". visual_pattern/campaign_mix의 분모와 정확히 같다(collection_history.get_alive_ads_in_range).
+    # 과거(STARTED/REACTIVATED 이벤트 기준)에는 이 값이 없었고, 기간 내내 조용히 살아있던 광고가
+    # 전부 누락돼 visual_pattern이 텅 비어 보이는 문제가 있었다.
+    alive_ad_count: int
+    # alive_ad_count와 동일한 분모(unique 광고, event 기준 아님). visual_type이 없는 광고는
+    # "UNANALYZED" 키로 명시한다(조용히 제외하지 않음 — 그렇지 않으면 비율이 왜곡된다).
     visual_pattern: dict[str, int]
-    # 캠페인 태그 이름이 아니라 campaign_tag_id(str) 또는 "NEEDS_REVIEW"를 키로 사용한다 — 프론트가
-    # 프로젝트의 캠페인 태그 목록과 join해 이름을 표시한다. 재분류 시 과거 기간 집계도 함께 바뀐다
-    # (현재 태그 분류 기준으로 항상 재계산 — docs/DATA_SEMANTICS.md 참고).
+    # campaign_tag_id(str) 또는 "NEEDS_REVIEW"/"UNCLASSIFIED"를 키로 사용한다 — 프론트가 프로젝트의
+    # 캠페인 태그 목록과 join해 이름을 표시한다. 재분류 시 과거 기간 집계도 함께 바뀐다(현재 태그
+    # 분류 기준으로 항상 재계산 — docs/DATA_SEMANTICS.md 참고).
     campaign_mix: dict[str, int]
 
 

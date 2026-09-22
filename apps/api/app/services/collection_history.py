@@ -277,6 +277,56 @@ def _changed_ad_out(ad: Ad, event: AdStatusEvent, competitor_name: str) -> Chang
     )
 
 
+def get_alive_ads_in_range(
+    db: Session,
+    competitor_ids: list[uuid.UUID],
+    start_date: date,
+    end_date: date,
+) -> list[Ad]:
+    """§2 — "선택 기간에 한 번이라도 실제로 라이브 상태로 관측된 광고" 집합. STARTED/REACTIVATED
+    이벤트가 아니라 AdObservation(성공/부분 수집에서 실제 fetch된 광고에 대해서만 기록되는 직접
+    관측 데이터)을 근거로 삼는다 — 기간 내내 조용히 살아있던 기존 광고, baseline 이후 그대로
+    유지된 광고도 전부 포함되도록 하기 위함(이벤트 기준으로는 이런 광고들이 전부 누락됐었다).
+
+    - FAILED collection_run은 AdObservation 자체가 없으므로 자동으로 제외된다(못 받아온 광고를
+      죽었다고 추정하지 않되, 애초에 "봤다"는 근거도 없으므로 alive 집합에 넣지 않는다).
+    - PARTIAL collection_run에서 실제 fetch된 광고는 관측 사실 자체는 유효하므로 포함한다.
+    - 같은 광고가 기간 내 여러 날 관측돼도 1회만 반환한다(DISTINCT ad_id).
+    """
+    alive_ad_ids = (
+        select(AdObservation.ad_id)
+        .join(CollectionRun, AdObservation.collection_run_id == CollectionRun.id)
+        .where(
+            AdObservation.competitor_id.in_(competitor_ids),
+            CollectionRun.run_date.between(start_date, end_date),
+        )
+        .distinct()
+    )
+    return list(db.scalars(select(Ad).where(Ad.id.in_(alive_ad_ids))).all())
+
+
+def _aggregate_visual_and_campaign_patterns(alive_ads: list[Ad]) -> tuple[dict[str, int], dict[str, int]]:
+    """§3/§4 — alive_ads_in_range 기준으로 visual_pattern/campaign_mix를 집계한다. 둘 다 동일한
+    분모(같은 alive 집합)를 쓴다 — 하나는 STARTED/REACTIVATED, 다른 하나는 라이브 전체처럼 기준이
+    갈라지지 않게 한다.
+
+    visual_pattern: visual_type이 없는 광고를 조용히 빼지 않고 UNANALYZED로 명시한다(그렇지 않으면
+    "태깅 완료 광고만 보면 100%"처럼 실제 라이브 광고 대비 비율이 왜곡된다).
+    campaign_mix: 태그+SUCCESS만 해당 태그로 집계하고, NEEDS_REVIEW는 별도, 그 외(PENDING/FAILED/
+    태그 없음)는 모두 UNCLASSIFIED로 묶는다(과도하게 세분화하지 않는다)."""
+    visual_counter: Counter[str] = Counter()
+    campaign_counter: Counter[str] = Counter()
+    for ad in alive_ads:
+        visual_counter[ad.visual_type or "UNANALYZED"] += 1
+        if ad.campaign_tag_id and ad.campaign_classification_status == "SUCCESS":
+            campaign_counter[str(ad.campaign_tag_id)] += 1
+        elif ad.campaign_classification_status == "NEEDS_REVIEW":
+            campaign_counter["NEEDS_REVIEW"] += 1
+        else:
+            campaign_counter["UNCLASSIFIED"] += 1
+    return dict(visual_counter), dict(campaign_counter)
+
+
 def get_ad_changes_range(
     db: Session,
     project_id: uuid.UUID,
@@ -291,9 +341,11 @@ def get_ad_changes_range(
     status별로 집계한 collection_run_summary + 시도가 있었던 날짜 목록(dates_with_collection)을
     반환한다. 프론트는 이 값과 기존 CollectionFreshness를 함께 보여준다.
 
-    visual_pattern/campaign_mix는 unique 광고 기준으로 집계한다(동일 광고가 기간 내
-    STARTED+REACTIVATED를 모두 가져도 1회만 카운트) — 변화 목록(started_ads 등)은 이벤트 기준으로
-    그대로 나열해 event history 의미를 보존한다(동일 광고의 여러 이벤트를 dedupe하지 않는다).
+    visual_pattern/campaign_mix는 get_alive_ads_in_range()(AdObservation 기반, §2)의 unique 광고
+    기준으로 집계한다 — 변화 목록(started_ads 등)은 이벤트 기준으로 그대로 나열해 event history
+    의미를 보존한다(동일 광고의 여러 이벤트를 dedupe하지 않는다). 2026-09 이전에는 STARTED/
+    REACTIVATED 이벤트가 있는 광고만 집계해, 기간 내내 조용히 살아있던 광고가 전부 누락되고
+    visual_pattern이 텅 비어 보이는 문제가 있었다 — 이번에 집계 기준 자체를 바꿨다.
     """
     competitor_ids = _competitor_ids_for_scope(db, project_id, competitor_id)
 
@@ -312,6 +364,7 @@ def get_ad_changes_range(
             started_ads=[],
             reactivated_ads=[],
             stopped_ads=[],
+            alive_ad_count=0,
             visual_pattern={},
             campaign_mix={},
         )
@@ -353,9 +406,6 @@ def get_ad_changes_range(
     reactivated: list[ChangedAdOut] = []
     stopped: list[ChangedAdOut] = []
     baseline_count = 0
-    # STARTED/REACTIVATED가 있었던 광고를 ad_id로 dedupe — visual_pattern/campaign_mix는 이 집합
-    # 기준으로 unique하게 집계한다(이벤트 기준이 아님).
-    unique_started_or_reactivated: dict[uuid.UUID, Ad] = {}
 
     for event, ad, competitor_name in rows:
         if event.event_type == AdChangeEventType.BASELINE_DISCOVERED.value:
@@ -365,22 +415,15 @@ def get_ad_changes_range(
         changed = _changed_ad_out(ad, event, competitor_name)
         if event.event_type == AdChangeEventType.STARTED.value:
             started.append(changed)
-            unique_started_or_reactivated[ad.id] = ad
         elif event.event_type == AdChangeEventType.REACTIVATED.value:
             reactivated.append(changed)
-            unique_started_or_reactivated[ad.id] = ad
         elif event.event_type == AdChangeEventType.STOPPED.value:
             stopped.append(changed)
 
-    visual_counter: Counter[str] = Counter()
-    campaign_counter: Counter[str] = Counter()
-    for ad in unique_started_or_reactivated.values():
-        if ad.visual_type:
-            visual_counter[ad.visual_type] += 1
-        if ad.campaign_tag_id and ad.campaign_classification_status == "SUCCESS":
-            campaign_counter[str(ad.campaign_tag_id)] += 1
-        else:
-            campaign_counter["NEEDS_REVIEW"] += 1
+    # §2/§3/§4 — visual_pattern/campaign_mix는 이벤트가 아니라 "이 기간에 실제로 관측된(alive)"
+    # 광고 전체를 분모로 삼는다. 두 패턴 모두 동일한 alive_ads 집합을 공유해 기준이 갈라지지 않는다.
+    alive_ads = get_alive_ads_in_range(db, competitor_ids, start_date, end_date)
+    visual_pattern, campaign_mix = _aggregate_visual_and_campaign_patterns(alive_ads)
 
     return AdChangesRangeResponse(
         project_id=project_id,
@@ -396,8 +439,9 @@ def get_ad_changes_range(
         started_ads=started,
         reactivated_ads=reactivated,
         stopped_ads=stopped,
-        visual_pattern=dict(visual_counter),
-        campaign_mix=dict(campaign_counter),
+        alive_ad_count=len(alive_ads),
+        visual_pattern=visual_pattern,
+        campaign_mix=campaign_mix,
     )
 
 

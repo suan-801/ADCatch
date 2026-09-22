@@ -223,16 +223,40 @@ Gemini 호출을 하지 않고, 대상 `Ad`의 `campaign_tag_id`/`assignment_sou
   작업을 이미 여러 소재를 동시 처리하는 동기 enrichment 경로에 추가해 수집 자체를 느리게 만들지
   않기 위함이다.
 
-**format 판별 규칙(카드 내부 영상이 있어도 절대 바뀌지 않음)**: `snapshot.videos`가 있으면
-`VIDEO`, 없고 `snapshot.cards`가 있으면 **카드 중 일부/전부가 영상이어도 항상 `CAROUSEL`**,
-그것도 없고 `snapshot.images`가 있으면 `IMAGE`. "카드 내부 영상"은 오직 `media_items`의 개별
-항목 `type`에만 반영되며, CAROUSEL을 VIDEO로 승격시키지 않는다.
+**format 판별 규칙 (2026-09 두 차례 개정 — 카드가 2개 이상일 때만 CAROUSEL로 고정)**:
+1. `snapshot.videos`에 실제 영상 URL이 있으면 → `VIDEO`.
+2. `snapshot.cards`가 있고 **카드가 2개 이상**이면 → `CAROUSEL`. 카드 중 일부/전부가 영상이어도
+   포맷은 바뀌지 않는다 — "카드 내부 영상"은 `media_items`의 개별 항목 `type`에만 반영된다.
+3. `snapshot.cards`가 **정확히 1개**이고 그 카드에 영상 URL이 있으면 → `VIDEO`로 취급한다
+   (Apify가 단일 영상 광고를 카드 1개짜리 `cards` 배열로 감싸 반환하는 케이스 대응 — 카드가
+   1개뿐이면 "여러 장 넘겨보는 캐러셀"이라는 의미 자체가 없다). 카드가 1개이고 영상이 없으면
+   `IMAGE`.
+4. `snapshot.images`만 있으면 → `IMAGE`.
 
-**기존(이 필드들이 생기기 전) VIDEO 소재의 backfill**: 별도 백필 스크립트를 두지 않는다. 다음
-수집에서 그 소재가 다시 발견될 때(`ad_sync.synchronize_ad_status`의 기존 소재 재발견 분기),
-`video_url`/`media_items`가 비어 있으면 채우고, VIDEO 포맷이고 `video_url`이 새로 확보됐으며
-`keyframe_status`가 아직 `NOT_APPLICABLE`이면 `PENDING`으로 전환해 pending 배치 대상이 되게
-한다. 이미 캐싱된 값은 절대 덮어쓰지 않는다.
+**진단 로깅(`app.services.ad_library_collector._log_media_classification`, 2026-09 추가)**: 매
+분류마다 `ad_archive_id`/`raw_display_format`(item 또는 snapshot의 `display_format`/
+`displayFormat` 키 — 존재하면 그대로 기록, 없으면 `"absent"`)/`videos_count`/`cards_count`/
+`images_count`/`card_video_count`/`unique_video_url_count`/`classified_format`/
+`classification_reason`을 structured log로 남긴다(URL 원문은 남기지 않음). **raw
+`display_format` 신호는 아직 분류 규칙에 반영하지 않았다** — 이 저장소에는 실제 Apify raw
+response 샘플이나 APIFY_TOKEN이 없어(2026-09 확인) 이 필드가 실제로 존재하는지, 어떤 값을
+갖는지 검증할 방법이 없었기 때문이다. 운영 환경에서 이 로그를 확인한 뒤 다음 라운드에서 근거를
+갖고 우선순위 규칙을 정한다(추측성 heuristic 추가 금지 원칙).
+
+**기존(이 필드들이 생기기 전, 또는 이전 규칙으로 잘못 판정됐던) 소재의 backfill/교정**: 별도
+백필 스크립트를 두지 않는다. 다음 수집에서 그 소재가 다시 발견될 때
+(`ad_sync.synchronize_ad_status`의 기존 소재 재발견 분기):
+- `video_url`/`media_items`가 비어 있으면 채운다(이미 있는 값은 덮어쓰지 않음).
+- **fresh raw evidence(`item.video_url` 또는 `item.media_items`가 비어있지 않음)가 명확하고
+  `item.format != existing.format`이면 `existing.format`을 최신 판정으로 교정한다.** 예:
+  과거 `CAROUSEL`로 저장됐던 소재가 새 규칙(3번)으로 `VIDEO`라고 재판정되면 DB의 `format`도
+  `VIDEO`로 바로잡는다. raw evidence가 비어있거나 불확실하면(빈 snapshot 등) 절대 덮어쓰지 않는다.
+- format이 `VIDEO`로 교정되고 아직 성공적으로 캐싱된 `keyframe_urls`가 없으면
+  `keyframe_status=PENDING`(+retry_count/error 초기화)으로 되돌려 keyframe pending 배치 대상에
+  넣는다. 이미 `SUCCESS`인 keyframe은 불필요하게 초기화하지 않는다.
+- `VIDEO → CAROUSEL/IMAGE` 방향 교정도 동일 원칙으로 처리하되, 이미 Storage에 업로드된
+  keyframe 파일을 지우는 destructive cleanup은 하지 않는다 — `keyframe_urls` 배열은 보존하고
+  `keyframe_status`만 `NOT_APPLICABLE`로 되돌린다.
 
 ## 11. 기간(주간) 조회 API의 `NO_RECORD` 해석 원칙 (2026-09)
 
@@ -246,9 +270,43 @@ Gemini 호출을 하지 않고, 대상 `Ad`의 `campaign_tag_id`/`assignment_sou
 반환한다. 프론트는 이 값을 기존 `CollectionFreshness`(`GET .../dashboard/freshness`)와 함께
 보여줘 데이터 신뢰도를 판단한다 — "시도 안 함"과 "시도했지만 실패"를 항상 구분해서 표시한다.
 
-`visual_pattern`/`campaign_mix`는 이 범위 API에서 **unique 광고 기준**으로 집계한다(동일 광고가
-기간 내 STARTED와 REACTIVATED를 모두 가져도 1회만 카운트). 반면 `started_ads`/`reactivated_ads`/
-`stopped_ads`(변화 목록)는 기존과 동일하게 **이벤트 기준**으로 dedupe 없이 나열한다 — 동일 광고가
-기간 안에서 여러 이벤트를 가진 경우 event history 의미를 보존하기 위함이다. (단일 날짜
-`get_ad_changes()`의 `visual_pattern`은 이벤트 기준 그대로 유지 — 하루 안에서는 사실상 항상
-동일한 결과이므로 건드리지 않았다.)
+`started_ads`/`reactivated_ads`/`stopped_ads`(변화 목록)는 **이벤트 기준**으로 dedupe 없이
+나열한다 — 동일 광고가 기간 안에서 여러 이벤트를 가진 경우 event history 의미를 보존하기 위함이다.
+(단일 날짜 `get_ad_changes()`의 이 동작은 그대로 유지 — 건드리지 않았다.)
+
+### 11.1 `visual_pattern`/`campaign_mix`의 분모 — "alive 기준"으로 재정의 (2026-09 추가 개정)
+
+**최초 도입 당시(2026-09 초)에는 `visual_pattern`/`campaign_mix`를 "STARTED 또는 REACTIVATED
+이벤트가 있었던 unique 광고" 기준으로 집계했다.** 이 방식은 실제로는 문제가 있었다 — 선택 기간
+내내 조용히 라이브 상태를 유지한 기존 광고(새 이벤트가 전혀 없는 광고)가 전부 집계에서 빠져서,
+실제로는 라이브 광고가 많아도 `visual_pattern`이 텅 비어 보이는 현상이 있었다.
+
+**지금은 두 값 모두 `collection_history.get_alive_ads_in_range()`가 계산하는
+"선택 기간에 한 번이라도 실제로 라이브 상태로 관측된 광고"(alive_ads_in_range) 집합을 공유
+분모로 삼는다.** STARTED/REACTIVATED 이벤트가 없어도, 그 기간 동안 `AdObservation`으로 계속
+관측됐다면 포함된다.
+
+- **source**: `AdObservation`(성공/부분 수집에서 실제 fetch된 광고에 대해서만 기록되는 직접
+  관측 데이터) ⋈ `CollectionRun.run_date BETWEEN start_date AND end_date`에서 `DISTINCT ad_id`.
+  같은 광고가 기간 내 여러 날 관측돼도 1회만 집계한다.
+  - `FAILED` collection_run은 `AdObservation` 자체가 생성되지 않으므로 자동으로 제외된다 —
+    "못 받아온 광고를 죽었다고 추정"하지 않으면서 동시에 "봤다"는 근거도 없으므로 alive로도
+    치지 않는다.
+  - `PARTIAL` collection_run에서 실제 fetch된 광고는 관측 사실 자체는 유효하므로 alive에 포함한다
+    (P0-02 — snapshot이 잘렸을 수 있다는 것과, 실제로 발견된 소재가 그 순간 라이브였다는 것은
+    별개의 사실이다).
+- **`visual_pattern` 분모**: alive_ads_in_range 전체. `visual_type`이 없는(아직 Gemini 분석 전인)
+  광고를 조용히 제외하지 않고 `"UNANALYZED"` 키로 명시한다 — 그렇지 않으면 "분석 완료 광고만
+  보면 100%"처럼 실제 라이브 광고 대비 비율이 왜곡된다.
+- **`campaign_mix` 분모**: 동일한 alive_ads_in_range. `campaign_tag_id`가 있고
+  `campaign_classification_status == SUCCESS`인 광고만 해당 태그로 집계하고, `NEEDS_REVIEW`는
+  별도 키, 그 외(`PENDING`/`FAILED`/태그 없음)는 전부 `"UNCLASSIFIED"`로 묶는다.
+- **`alive_ad_count`**(신규 additive 필드): 위 두 dict의 값 합계와 항상 같다 — 프론트가 "선택 기간
+  라이브 소재 N개 기준"이라는 문구에 활용한다.
+- 비주얼 패턴과 캠페인 패턴은 **항상 같은 분모**를 쓴다 — 하나는 이벤트 기준, 다른 하나는 다른
+  기준으로 절대 갈라지지 않는다.
+- **재분류/재분석이 과거 기간 집계에 미치는 영향은 §9의 원칙과 동일하다** — `Ad.visual_type`/
+  `campaign_tag_id`는 "현재 값"이므로, 소재를 재분석/재분류하면 그 소재가 걸린 과거 주차의
+  집계도 함께 바뀐다(스냅샷이 아니다).
+- 단일 날짜 `get_ad_changes()`의 `visual_pattern`은 이 개정의 영향을 받지 않는다(이벤트 기준
+  그대로 유지 — 건드리지 않았다). 향후 단일 날짜 API도 동일한 필요가 생기면 별도로 검토한다.

@@ -96,9 +96,10 @@ def test_multiple_events_for_same_ad_preserved_individually(db, competitor):
     assert result.reactivated_ads[0].event_date == date(2026, 9, 11)
 
 
-def test_visual_pattern_dedupes_by_unique_ad(db, competitor):
-    """같은 광고가 기간 내 STARTED와 REACTIVATED를 모두 가져도 visual_pattern은 1회만 카운트한다
-    (event 기준이 아니라 unique ad 기준) — 사용자 리뷰 #9."""
+def test_visual_pattern_uses_alive_ads_not_started_reactivated_events(db, competitor):
+    """2026-09 개정 핵심 회귀: visual_pattern은 더 이상 STARTED/REACTIVATED 이벤트 기준이 아니다.
+    "Z"는 이 기간 동안 단 한 번도 STARTED/REACTIVATED 이벤트를 갖지 않지만(baseline 이후 계속
+    라이브), 매 수집마다 관측(AdObservation)되므로 alive_ads_in_range에 포함돼야 한다."""
     synchronize_ad_status(db, competitor.id, [_raw("Z")], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
     synchronize_ad_status(
         db, competitor.id, [_raw("Z"), _raw("A")], _run(db, competitor, date(2026, 9, 7)), tag_visual=False
@@ -115,8 +116,10 @@ def test_visual_pattern_dedupes_by_unique_ad(db, competitor):
     )
 
     result = collection_history.get_ad_changes_range(db, competitor.project_id, date(2026, 9, 7), date(2026, 9, 11), None)
-    assert len(result.started_ads) + len(result.reactivated_ads) == 2  # 이벤트는 2건
-    assert result.visual_pattern == {"PRODUCT": 1}  # 그러나 unique ad 기준 1건
+    assert len(result.started_ads) + len(result.reactivated_ads) == 2  # 변화 목록은 여전히 이벤트 기준
+    # visual_pattern은 alive 기준 — A(PRODUCT, 1회만 카운트) + Z(UNANALYZED, 이벤트 없이도 포함).
+    assert result.visual_pattern == {"PRODUCT": 1, "UNANALYZED": 1}
+    assert result.alive_ad_count == 2
 
 
 def test_collection_run_summary_distinguishes_no_attempt_from_failure(db, competitor):

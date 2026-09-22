@@ -13,7 +13,20 @@ import type {
   Project,
   ProjectSummary,
   SyncResult,
+  VisualAnalysisProcessPendingResult,
 } from "./types";
+
+// §13 — Gallery backend filtering. 모든 필드는 optional이며, 하나도 넘기지 않으면 기존과 동일하게
+// 프로젝트 전체(비아카이브)를 반환한다(하위 호환).
+export interface ProjectAdsFilterParams {
+  competitorId?: string;
+  status?: string;
+  format?: string;
+  visualType?: string;
+  /** 태그 UUID, 또는 미분류(태그 없음) 필터용 특수값 "NEEDS_REVIEW". */
+  campaignTagId?: string;
+  search?: string;
+}
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
@@ -82,9 +95,20 @@ export const api = {
 
   listAds: (competitorId: string) => request<Ad[]>(`/competitors/${competitorId}/ads`),
   // §13-1 성능 최적화 — 브랜드별 listAds() N회 호출 대신 프로젝트 전체를 1회로 조회한다.
-  // 기존 listAds(competitorId)는 삭제하지 않고 그대로 유지한다.
-  listProjectAds: (projectId: string) =>
-    request<(Ad & { competitor_name: string })[]>(`/projects/${projectId}/ads`),
+  // 기존 listAds(competitorId)는 삭제하지 않고 그대로 유지한다. §13(2026-09): 서버 측 필터를
+  // additive query param으로 지원 — 프론트가 전체를 받아 클라이언트에서 필터링하는 경로를 주요
+  // 경로로 쓰지 않는다(필터 없이 호출하면 기존과 동일하게 전체 반환).
+  listProjectAds: (projectId: string, filters: ProjectAdsFilterParams = {}) => {
+    const qs = new URLSearchParams();
+    if (filters.competitorId) qs.set("competitor_id", filters.competitorId);
+    if (filters.status) qs.set("status", filters.status);
+    if (filters.format) qs.set("format", filters.format);
+    if (filters.visualType) qs.set("visual_type", filters.visualType);
+    if (filters.campaignTagId) qs.set("campaign_tag_id", filters.campaignTagId);
+    if (filters.search) qs.set("search", filters.search);
+    const query = qs.toString();
+    return request<(Ad & { competitor_name: string })[]>(`/projects/${projectId}/ads${query ? `?${query}` : ""}`);
+  },
   collectNow: (competitorId: string) =>
     request<SyncResult>(`/competitors/${competitorId}/ads/collect`, { method: "POST" }),
   getAdHistory: (adId: string) => request<AdHistoryResponse>(`/ads/${adId}/history`),
@@ -134,6 +158,14 @@ export const api = {
   // Gemini에 보내지 않는다.
   processPendingCampaignTags: (projectId: string, limit?: number) =>
     request<CampaignTagProcessPendingResult>(`/projects/${projectId}/campaign-tags/process-pending`, {
+      method: "POST",
+      body: JSON.stringify(limit ? { limit } : {}),
+    }),
+
+  // §9/§10 — 대시보드 "분석 업데이트"(Gemini Vision, visual_type) 버튼. campaign-tags의
+  // process-pending과 동일한 bounded-batch 원칙(서버가 상한을 강제).
+  processPendingVisualAnalysis: (projectId: string, limit?: number) =>
+    request<VisualAnalysisProcessPendingResult>(`/projects/${projectId}/visual-analysis/process-pending`, {
       method: "POST",
       body: JSON.stringify(limit ? { limit } : {}),
     }),

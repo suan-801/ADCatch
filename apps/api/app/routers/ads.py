@@ -2,8 +2,8 @@ import uuid
 from datetime import datetime, timezone
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import false, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -131,19 +131,58 @@ def update_ad_campaign_tag(
 @project_ads_router.get("", response_model=list[AdWithCompetitorOut])
 def list_project_ads(
     project_id: uuid.UUID,
+    competitor_id: uuid.UUID | None = Query(None),
+    status: str | None = Query(None, description="NEW | ACTIVE | INACTIVE"),
+    format: str | None = Query(None, description="IMAGE | VIDEO | CAROUSEL"),
+    visual_type: str | None = Query(None, description="PERSON | PRODUCT | TEXT_HEAVY | GRAPHIC | UNANALYZED"),
+    campaign_tag_id: str | None = Query(
+        None, description="태그 UUID, 또는 미분류(태그 없음) 필터용 특수값 NEEDS_REVIEW"
+    ),
+    search: str | None = Query(None, description="copy_text/cta_text 부분 일치(대소문자 무시)"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
     """§13-1 성능 최적화 — 대시보드가 브랜드마다 listAds()를 N회 호출하던 것을 1회로 통합한다.
-    값의 의미는 기존 조합(경쟁사별 조회 후 클라이언트에서 합치기)과 동일하다."""
+    값의 의미는 기존 조합(경쟁사별 조회 후 클라이언트에서 합치기)과 동일하다.
+
+    §13(2026-09) — 모든 필터 파라미터는 additive/optional이다. 하나도 넘기지 않으면 기존과 동일하게
+    프로젝트 전체(비아카이브)를 반환한다(하위 호환) — 프론트가 전체를 받아 클라이언트에서 필터링하던
+    경로를 주요 경로로 쓰지 않고, WHERE 조건으로 서버에서 필터링한다."""
     project = db.get(Project, project_id)
     if project is None or project.user_id != user.id:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    conditions = [Competitor.project_id == project_id, Ad.is_archived.is_(False)]
+    if competitor_id is not None:
+        conditions.append(Ad.competitor_id == competitor_id)
+    if status is not None:
+        conditions.append(Ad.status == status)
+    if format is not None:
+        conditions.append(Ad.format == format)
+    if visual_type is not None:
+        if visual_type == "UNANALYZED":
+            conditions.append(Ad.visual_type.is_(None))
+        else:
+            conditions.append(Ad.visual_type == visual_type)
+    if campaign_tag_id is not None:
+        if campaign_tag_id == "NEEDS_REVIEW":
+            conditions.append(Ad.campaign_tag_id.is_(None))
+        else:
+            # campaign_tag_id 컬럼은 Uuid(as_uuid=True) 타입이라 plain str을 그대로 바인딩하면
+            # SQLAlchemy의 UUID 프로세서가 실패한다("'str' object has no attribute 'hex'") — 명시적으로
+            # uuid.UUID로 변환한다. 잘못된 형식이면 조용히 빈 결과로 처리한다(존재할 수 없는 값이므로).
+            try:
+                conditions.append(Ad.campaign_tag_id == uuid.UUID(campaign_tag_id))
+            except ValueError:
+                conditions.append(false())
+    if search:
+        like = f"%{search.lower()}%"
+        conditions.append(or_(func.lower(Ad.copy_text).like(like), func.lower(Ad.cta_text).like(like)))
+
     rows = db.execute(
         select(Ad, Competitor.name)
         .join(Competitor, Ad.competitor_id == Competitor.id)
-        .where(Competitor.project_id == project_id, Ad.is_archived.is_(False))
+        .where(*conditions)
         .order_by(Ad.first_seen_at.asc())
     ).all()
 

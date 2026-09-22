@@ -3,7 +3,12 @@
 그대로 반영한 fixture dict로 검증한다."""
 
 from app.schemas import AdFormat
-from app.services.ad_library_collector import classify_and_extract_media
+from app.services.ad_library_collector import (
+    _classify_media,
+    _log_media_classification,
+    _raw_display_format,
+    classify_and_extract_media,
+)
 
 
 def test_videos_only_uses_hd_over_sd_and_keeps_preview_as_representative_image():
@@ -159,6 +164,80 @@ def test_single_card_with_no_media_at_all():
     assert fmt == AdFormat.IMAGE
     assert image_url is None
     assert media_items == []
+
+
+def test_raw_display_format_reads_top_level_or_snapshot_key():
+    assert _raw_display_format({"display_format": "VIDEO"}) == "VIDEO"
+    assert _raw_display_format({"displayFormat": "DCO"}) == "DCO"
+    assert _raw_display_format({"snapshot": {"display_format": "CAROUSEL"}}) == "CAROUSEL"
+    assert _raw_display_format({"snapshot": {"displayFormat": "DPA"}}) == "DPA"
+    assert _raw_display_format({}) is None
+    assert _raw_display_format({"snapshot": {}}) is None
+
+
+def test_classify_media_returns_reason_for_each_branch():
+    """§15 진단 로그가 쓰는 classification_reason이 각 분기마다 올바르게 붙는지 확인한다."""
+    _, _, _, _, reason = _classify_media({"snapshot": {"videos": [{"video_hd_url": "https://cdn/x.mp4"}]}})
+    assert reason == "videos_present"
+
+    _, _, _, _, reason = _classify_media({"snapshot": {"cards": [{"video_hd_url": "https://cdn/x.mp4"}]}})
+    assert reason == "single_card_video"
+
+    _, _, _, _, reason = _classify_media({"snapshot": {"cards": [{"original_image_url": "https://cdn/x.jpg"}]}})
+    assert reason == "single_card_image"
+
+    _, _, _, _, reason = _classify_media({"snapshot": {"cards": [{}]}})
+    assert reason == "single_card_empty"
+
+    _, _, _, _, reason = _classify_media(
+        {"snapshot": {"cards": [{"original_image_url": "https://cdn/a.jpg"}, {"original_image_url": "https://cdn/b.jpg"}]}}
+    )
+    assert reason == "multi_cards_fallback"
+
+    _, _, _, _, reason = _classify_media({"snapshot": {"images": [{"original_image_url": "https://cdn/x.jpg"}]}})
+    assert reason == "images_present"
+
+    _, _, _, _, reason = _classify_media({"snapshot": {}})
+    assert reason == "no_media"
+
+
+def test_diagnostic_logging_does_not_raise_and_reports_raw_display_format(caplog):
+    """§15/§16 회귀: raw_display_format이 VIDEO를 명확히 가리키는데도 카드가 2개 이상이면 현재
+    구현은 여전히 CAROUSEL로 판정한다 — display_format 우선순위 규칙은 실제 운영 raw로 검증하기
+    전까지 아직 반영하지 않았다(§16). 진단 로그가 이 불일치를 그대로 드러내는지 확인한다."""
+    import logging
+
+    item = {
+        "display_format": "VIDEO",
+        "snapshot": {
+            "cards": [
+                {"original_image_url": "https://cdn/a.jpg"},
+                {"original_image_url": "https://cdn/b.jpg"},
+            ]
+        },
+    }
+    with caplog.at_level(logging.INFO, logger="adcatcher.media_classification"):
+        fmt, _, _, _ = classify_and_extract_media(item, ad_archive_id="AD123")
+
+    assert fmt == AdFormat.CAROUSEL  # 아직 raw_display_format을 규칙에 반영하지 않음(§16 미해결)
+    log_text = caplog.text
+    assert "ad_archive_id=AD123" in log_text
+    assert "raw_display_format=VIDEO" in log_text
+    assert "classified_format=CAROUSEL" in log_text
+    assert "classification_reason=multi_cards_fallback" in log_text
+
+
+def test_diagnostic_logging_reports_absent_when_no_display_format(caplog):
+    import logging
+
+    item = {"snapshot": {"images": [{"original_image_url": "https://cdn/x.jpg"}]}}
+    with caplog.at_level(logging.INFO, logger="adcatcher.media_classification"):
+        classify_and_extract_media(item)
+    assert "raw_display_format=absent" in caplog.text
+
+
+def test_log_media_classification_helper_does_not_raise_on_minimal_item():
+    _log_media_classification({}, None, AdFormat.IMAGE, "no_media")
 
 
 def test_multi_card_all_video_still_carousel():

@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     # Scheduler의 대형 배치(campaign_classification_pending_batch_size)와 별개로, 요청 1건에서
     # 수십~수백 개를 Gemini에 보내지 않도록 작게 제한한다.
     campaign_classification_manual_batch_size: int = 10
+    # 대시보드 "분석 업데이트"(Gemini Vision, visual_type) 버튼용 — 위와 동일한 원칙.
+    visual_analysis_manual_batch_size: int = 10
 
     # ── VIDEO Keyframe 캐싱 (2026-09) ────────────────────────────────────
     # 신규 수집 동기 경로에서는 절대 실행하지 않는다 — 별도 pending 배치(process_pending_video_keyframes)
