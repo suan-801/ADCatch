@@ -72,7 +72,7 @@ CREATE TABLE IF NOT EXISTS ads (
     source_started_at TIMESTAMPTZ,
     status VARCHAR(20) DEFAULT 'NEW', -- 'NEW', 'ACTIVE', 'INACTIVE'
     visual_type VARCHAR(50), -- 'PERSON', 'PRODUCT', 'TEXT_HEAVY', 'GRAPHIC'
-    format VARCHAR(20), -- 'IMAGE', 'VIDEO', 'CAROUSEL'
+    format VARCHAR(20), -- 'IMAGE', 'VIDEO' (2026-09-23: CAROUSEL 제거 — 마이그레이션은 003_simplify_media_format.sql)
     image_url TEXT,
     copy_text TEXT,
     cta_text VARCHAR(100),
@@ -95,12 +95,15 @@ CREATE TABLE IF NOT EXISTS ads (
     campaign_classification_status VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING|SUCCESS|NEEDS_REVIEW|FAILED
     campaign_classification_retry_count INT NOT NULL DEFAULT 0,
     campaign_classification_error TEXT,
-    -- VIDEO/CAROUSEL 미디어 메타데이터 (additive, 2026-09) — image_url은 기존과 동일하게
+    -- VIDEO 미디어 메타데이터 (additive, 2026-09) — image_url은 기존과 동일하게
     -- "대표 썸네일 1장"으로 계속 쓰인다.
-    video_url TEXT, -- VIDEO 포맷 전용, HD 우선(SD fallback)
-    media_items JSONB, -- [{type, url, preview_url}] 카드/영상 원본 구조 보존
-    keyframe_urls JSONB, -- 캐싱된 keyframe URL 최대 4개
-    keyframe_status VARCHAR(20) NOT NULL DEFAULT 'NOT_APPLICABLE', -- NOT_APPLICABLE|PENDING|SUCCESS|FAILED
+    video_url TEXT, -- VIDEO 포맷 전용 참고용 원본 URL(HD 우선, SD fallback) — UI에서 재생하지 않는다
+    -- media_items/keyframe_* : 2026-09-23 ffmpeg keyframe 파이프라인 폐기 + CAROUSEL 제거로
+    -- 더 이상 API/서비스에서 쓰지 않는다. 컬럼은 legacy로 남겨둔다(운영 안정화 후 별도
+    -- migration으로 drop 검토) — db/migrations/003_simplify_media_format.sql 참고.
+    media_items JSONB,
+    keyframe_urls JSONB,
+    keyframe_status VARCHAR(20) NOT NULL DEFAULT 'NOT_APPLICABLE',
     keyframe_retry_count INT NOT NULL DEFAULT 0,
     keyframe_error TEXT,
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP

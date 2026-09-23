@@ -108,16 +108,10 @@ export function AdGallery({
                   비주얼 분석 대기
                 </span>
               )}
-              {/* VIDEO/CAROUSEL 판별 배지 — 목록에서는 대표 썸네일 1장만 보여주고(keyframe 4장을
-                  펼치지 않음), 포맷만 아이콘/배지로 구분한다. */}
+              {/* IMAGE/VIDEO 2분류(2026-09-23) — 대표 썸네일 1장만 보여주고, VIDEO는 ▶ 배지만 붙인다. */}
               {ad.format === "VIDEO" && (
                 <span className="absolute bottom-2 left-2 flex h-6 w-6 items-center justify-center rounded-full bg-foreground/80 text-xs text-white">
                   ▶
-                </span>
-              )}
-              {ad.format === "CAROUSEL" && ad.media_items.some((m) => m.type === "video") && (
-                <span className="absolute bottom-2 left-2 rounded-full bg-foreground/80 px-2 py-1 text-[9px] font-semibold text-white">
-                  캐러셀 · 영상 포함
                 </span>
               )}
             </div>

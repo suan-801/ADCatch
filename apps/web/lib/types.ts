@@ -1,6 +1,8 @@
 export type AdStatus = "NEW" | "ACTIVE" | "INACTIVE";
 export type VisualType = "PERSON" | "PRODUCT" | "TEXT_HEAVY" | "GRAPHIC";
-export type AdFormat = "IMAGE" | "VIDEO" | "CAROUSEL";
+// 2026-09-23 재설계 — CAROUSEL 제거. 캐러셀은 첫 카드 대표 이미지 1장으로 IMAGE 취급하고,
+// 명확한 영상 광고만 VIDEO로 판정한다(apps/api docs/DATA_SEMANTICS.md §10).
+export type AdFormat = "IMAGE" | "VIDEO";
 export type ProjectStatus = "ACTIVE" | "PAUSED";
 
 // ── Campaign Tag 자동 분류 (additive) ────────────────────────────────────
@@ -57,17 +59,8 @@ export interface VisualAnalysisProcessPendingResult {
   pending_remaining: number;
 }
 
-// ── VIDEO/CAROUSEL 미디어 메타데이터 (additive) ─────────────────────────
-export interface MediaItem {
-  type: "image" | "video";
-  url: string;
-  preview_url: string | null;
-}
-
-export type KeyframeStatus = "NOT_APPLICABLE" | "PENDING" | "SUCCESS" | "FAILED";
-
 // 여러 화면(Ad Detail Drawer, 기간별 변화 카드)이 공유하는 라벨 — 중복 정의 방지.
-export const FORMAT_LABEL: Record<string, string> = { IMAGE: "이미지", VIDEO: "영상", CAROUSEL: "캐러셀" };
+export const FORMAT_LABEL: Record<string, string> = { IMAGE: "이미지", VIDEO: "영상" };
 export const VISUAL_LABEL: Record<string, string> = {
   PERSON: "인물",
   PRODUCT: "제품",
@@ -123,11 +116,8 @@ export interface Ad {
   campaign_tag_assignment_source: CampaignTagAssignmentSource | null;
   campaign_tag_classified_at: string | null;
   campaign_classification_status: CampaignClassificationStatus;
-  // VIDEO/CAROUSEL 미디어 메타데이터 (additive) — image_url은 기존과 동일하게 대표 썸네일 1장.
+  // VIDEO 포맷의 참고용 원본 URL(재생하지 않음) — image_url은 기존과 동일하게 대표 썸네일 1장.
   video_url: string | null;
-  media_items: MediaItem[];
-  keyframe_urls: string[];
-  keyframe_status: KeyframeStatus;
 }
 
 // Part C-03 — Ad Detail Drawer의 event history.

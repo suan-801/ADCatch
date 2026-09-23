@@ -271,9 +271,6 @@ def _changed_ad_out(ad: Ad, event: AdStatusEvent, competitor_name: str) -> Chang
         campaign_tag_classified_at=ad.campaign_tag_classified_at,
         campaign_classification_status=ad.campaign_classification_status,
         video_url=ad.video_url,
-        media_items=ad.media_items or [],
-        keyframe_urls=ad.keyframe_urls or [],
-        keyframe_status=ad.keyframe_status,
     )
 
 

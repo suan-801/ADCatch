@@ -102,99 +102,26 @@ function CampaignTagSection({
   );
 }
 
-// §VIDEO PREVIEW/KEY VISUAL — VIDEO는 항상 대표 영상 썸네일을 먼저 보여주고(▶ 표시), 그 아래에
-// keyframe이 있으면 "KEY VISUAL" 2x2 grid를 추가로 보여준다(대표 썸네일을 keyframe으로 대체하지
-// 않는다 — 둘 다 함께 노출). PENDING/FAILED는 대표 썸네일은 정상 표시하고 상태 캡션만 붙인다.
-function videoKeyframeStatusCaption(ad: DrawerAd): string | null {
-  if (ad.format !== "VIDEO") return null;
-  if (ad.keyframe_urls.length > 0) return null;
-  if (ad.keyframe_status === "PENDING") return "영상 장면 추출 대기 중";
-  if (ad.keyframe_status === "FAILED") return "영상 장면 추출 실패";
-  if (ad.keyframe_status === "SUCCESS") {
-    // 모순 상태(SUCCESS인데 urls 없음) — 조용히 넘기지 않고 원인을 알 수 있게 남긴다.
-    return "영상 장면 정보를 불러오지 못했습니다(대표 이미지로 표시 중).";
-  }
-  return null; // NOT_APPLICABLE — VIDEO인데 이 값이면 데이터 정합성 문제지만, UI는 조용히 대표 이미지로 폴백.
-}
-
-function VideoMedia({ ad }: { ad: DrawerAd }) {
-  const keyframeCaption = videoKeyframeStatusCaption(ad);
-  return (
-    <div className="space-y-2">
-      <div className="relative flex aspect-[4/5] items-center justify-center overflow-hidden rounded-xl bg-slate-50">
-        {ad.image_url ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={ad.image_url}
-            alt={ad.copy_text ?? "ad creative"}
-            className="h-full w-full object-contain"
-          />
-        ) : (
-          <span className="text-xs text-muted">미디어 없음</span>
-        )}
-        <span className="absolute bottom-2 left-2 flex h-8 w-8 items-center justify-center rounded-full bg-foreground/70 text-sm text-white">
-          ▶
-        </span>
-      </div>
-      {keyframeCaption && <p className="text-center text-xs text-muted">{keyframeCaption}</p>}
-      {ad.keyframe_urls.length > 0 && (
-        <div>
-          <p className="text-xs font-semibold text-muted">KEY VISUAL</p>
-          {/* keyframe들은 같은 영상에서 나온 동일 비율 프레임이므로 aspect-square+object-cover로
-              강제 crop하지 않는다 — 9:16 세로형 영상의 상단/하단 자막이 잘리는 걸 방지한다. */}
-          <div className="mt-1.5 grid grid-cols-2 gap-1.5">
-            {ad.keyframe_urls.slice(0, 4).map((url, i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img key={i} src={url} alt={`장면 ${i + 1}`} className="w-full rounded-lg object-contain" />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
+// IMAGE/VIDEO 2분류(2026-09-23 재설계) — 대표 썸네일 1장을 보여주고, VIDEO는 ▶ 배지만 덧붙인다.
+// ffmpeg keyframe 추출/CAROUSEL 카드 grid는 제거했다(운영 복잡도 대비 가치가 낮다고 판단 —
+// docs/DATA_SEMANTICS.md §10). 영상 원본을 보고 싶으면 하단 "Meta에서 보기" 버튼을 쓴다.
 function MediaDetail({ ad }: { ad: DrawerAd }) {
-  if (ad.format === "VIDEO") {
-    return <VideoMedia ad={ad} />;
-  }
-
-  // CAROUSEL — 카드 구성을 그대로 보여준다(영상 포함 카드는 ▶ 오버레이). 재생 인터랙션은 없음 —
-  // "왜 어떤 건 영상이고 어떤 건 캐러셀인지"를 시각적으로 바로 확인시키는 목적.
-  if (ad.format === "CAROUSEL" && ad.media_items.length > 0) {
-    return (
-      <div className="grid grid-cols-2 gap-1.5">
-        {ad.media_items.map((item, i) => (
-          <div key={i} className="relative aspect-square w-full overflow-hidden rounded-lg bg-slate-100">
-            {item.type === "video" && item.preview_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={item.preview_url} alt={`카드 ${i + 1}`} className="h-full w-full object-cover" />
-            ) : item.type === "image" ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={item.url} alt={`카드 ${i + 1}`} className="h-full w-full object-cover" />
-            ) : null}
-            {item.type === "video" && (
-              <span className="absolute inset-0 flex items-center justify-center bg-foreground/20 text-lg text-white">
-                ▶
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
   return (
-    <div className="flex aspect-[4/5] items-center justify-center rounded-xl bg-slate-50">
+    <div className="relative flex aspect-[4/5] items-center justify-center overflow-hidden rounded-xl bg-slate-50">
       {ad.image_url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={ad.image_url}
           alt={ad.copy_text ?? "ad creative"}
-          className="h-full w-full rounded-xl object-contain"
+          className="h-full w-full object-contain"
         />
       ) : (
         <span className="text-xs text-muted">미디어 없음</span>
+      )}
+      {ad.format === "VIDEO" && (
+        <span className="absolute bottom-2 left-2 flex h-8 w-8 items-center justify-center rounded-full bg-foreground/70 text-sm text-white">
+          ▶
+        </span>
       )}
     </div>
   );
@@ -279,11 +206,6 @@ export function AdDetailDrawer({
             {ad.competitor_name && <span className="text-xs font-medium text-muted">{ad.competitor_name}</span>}
             {ad.format === "VIDEO" && (
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-muted">▶ 영상</span>
-            )}
-            {ad.format === "CAROUSEL" && ad.media_items.some((m) => m.type === "video") && (
-              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-muted">
-                캐러셀 · 영상 포함
-              </span>
             )}
           </div>
 

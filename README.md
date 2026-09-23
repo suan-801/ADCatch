@@ -127,18 +127,15 @@ python -m scripts.process_pending_campaign_classification --limit 50
 자세한 assignment_source/classification_status 의미와 재분류 규칙은
 [`docs/DATA_SEMANTICS.md`](./docs/DATA_SEMANTICS.md) §9 참고.
 
-## VIDEO Keyframe 캐싱 (2026-09)
+## VIDEO/IMAGE 미디어 분류 (2026-09-23)
 
-VIDEO 소재의 대표 keyframe(최대 4장)은 수집과 완전히 분리된 별도 배치가 생성합니다 — 시스템에
-**ffmpeg/ffprobe**가 설치돼 있어야 동작하며, 없으면 자동 감지되어 즉시 실패 처리됩니다(기존 preview
-썸네일로 정상 폴백되므로 필수 설치는 아닙니다). 즉시 재시도하려면:
+포맷은 `IMAGE`/`VIDEO` 2가지뿐입니다(CAROUSEL 제거). 캐러셀은 첫 카드의 대표 이미지 1장으로
+`IMAGE` 취급하고, 명확한 영상 신호(display_format=VIDEO 또는 snapshot.videos)가 있을 때만
+`VIDEO`로 판정합니다. 예전에 있던 ffmpeg keyframe 추출 파이프라인(mp4 다운로드 → ffprobe →
+ffmpeg → Storage 업로드 ×4)은 완전히 제거했습니다 — 시스템에 ffmpeg를 설치할 필요가 없습니다.
+VIDEO 소재는 Meta가 제공하는 preview 썸네일 1장만 캐싱합니다.
 
-```bash
-cd apps/api
-python -m scripts.process_pending_video_keyframes
-```
-
-자세한 필드 의미는 [`docs/DATA_SEMANTICS.md`](./docs/DATA_SEMANTICS.md) §10 참고.
+자세한 판정 규칙과 필드 의미는 [`docs/DATA_SEMANTICS.md`](./docs/DATA_SEMANTICS.md) §10 참고.
 
 ## DB 스키마 변경 시 주의
 

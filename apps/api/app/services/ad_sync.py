@@ -256,16 +256,15 @@ def synchronize_ad_status(
             enrichment_results = _enrich_new_ads_concurrently(competitor_id, new_items, active_campaign_tags)
 
         # 기존(재발견) 소재 중 (a) image_url이 여전히 비어 있거나, (b) 이번에 format이 실제로
-        # 교정되는 소재 — Gemini 없이 캐싱만 backfill한다. (b)를 포함하는 이유: CAROUSEL로 잘못
-        # 저장됐던 광고가 VIDEO로 교정되면 예전 대표 썸네일(카드 이미지)은 새 포맷 기준으로 더 이상
-        # 유효하지 않으므로 함께 갱신해야 한다(§DONE CRITERIA — Gallery에 실제 영상 썸네일이 떠야
-        # 한다). 매 수집마다 새로 계산하지만 대상은 보통 소수다.
+        # 교정되는 소재 — Gemini 없이 캐싱만 backfill한다. (b)를 포함하는 이유: 예전에 잘못
+        # 저장됐던 광고가 최신 판정으로 교정되면 예전 대표 썸네일은 옛 포맷 기준이라 더 이상
+        # 유효하지 않을 수 있으므로 함께 갱신해야 한다. 매 수집마다 새로 계산하지만 대상은 보통 소수다.
         backfill_targets: list[tuple[str, str]] = []
         for aid, existing_ad in existing_by_archive_id.items():
             fresh_item = fetched_by_archive_id.get(aid)
             if fresh_item is None or not fresh_item.image_url:
                 continue
-            fresh_format_evidence = bool(fresh_item.video_url) or bool(fresh_item.media_items)
+            fresh_format_evidence = bool(fresh_item.video_url) or bool(fresh_item.image_url)
             format_will_change = fresh_format_evidence and fresh_item.format.value != existing_ad.format
             if existing_ad.image_url is None or format_will_change:
                 backfill_targets.append((aid, fresh_item.image_url))
@@ -316,11 +315,6 @@ def synchronize_ad_status(
             # P0-09: baseline(pending) 중에 발견된 소재는 "오늘 켠 광고"가 아니라 "처음 확인한
             # 현재 집행 소재"이므로 NEW가 아니라 ACTIVE로 생성한다(Gallery NEW 배지 방지).
             initial_status = AdStatus.ACTIVE.value if is_baseline_pending else AdStatus.NEW.value
-            # VIDEO/CAROUSEL 미디어 — keyframe 추출은 여기서 절대 하지 않는다(§8, 별도 pending
-            # 배치가 처리). VIDEO이고 video_url이 있으면 PENDING으로만 표시해둔다.
-            keyframe_status = (
-                "PENDING" if item.format.value == "VIDEO" and item.video_url else "NOT_APPLICABLE"
-            )
             db.add(
                 Ad(
                     id=new_ad_id,
@@ -346,9 +340,9 @@ def synchronize_ad_status(
                     campaign_tag_classified_at=campaign_tag_classified_at,
                     campaign_classification_status=campaign_classification_status,
                     campaign_classification_error=campaign_classification_error,
+                    # VIDEO 포맷의 참고용 원본 URL — UI에서 재생하지 않는다(2026-09-23, keyframe
+                    # 파이프라인 폐기와 함께 단순화). IMAGE는 NULL.
                     video_url=item.video_url,
-                    media_items=[m.model_dump() for m in item.media_items] if item.media_items else None,
-                    keyframe_status=keyframe_status,
                 )
             )
             new_count += 1
@@ -381,62 +375,31 @@ def synchronize_ad_status(
             existing.is_archived = False  # P0-04: 재등장한 아카이빙 광고 복원 (신규 row 생성 안 함)
             kept_active_count += 1
 
-            # format 교정(2026-09) — 과거에 잘못 판정된 format을 최신 raw 판정으로 바로잡는다.
-            # raw evidence(video_url 또는 media_items)가 명확할 때만 교정하고, 애매하거나 비어
-            # 있으면 기존 format을 절대 덮어쓰지 않는다(예: 일시적으로 빈 snapshot이 온 경우).
-            was_video = existing.format == AdFormat.VIDEO.value
-            old_video_url = existing.video_url
-            has_clear_media_evidence = bool(item.video_url) or bool(item.media_items)
+            # format 교정(2026-09, 2026-09-23 단순화) — 과거에 잘못 판정된 format을 최신 raw
+            # 판정으로 바로잡는다. raw evidence(video_url 또는 image_url)가 명확할 때만 교정하고,
+            # 애매하거나 비어 있으면 기존 format을 절대 덮어쓰지 않는다(예: 일시적으로 빈 snapshot이
+            # 온 경우). keyframe lifecycle은 2026-09-23에 ffmpeg 파이프라인 자체를 폐기하면서
+            # 함께 제거했다 — format/image_url/video_url만 갱신하면 된다.
+            has_clear_media_evidence = bool(item.video_url) or bool(item.image_url)
             format_changed = has_clear_media_evidence and item.format.value != existing.format
             if format_changed:
                 existing.format = item.format.value
 
-            # media_items는 ephemeral Meta CDN 메타데이터이므로(§ SIGNED VIDEO URL REFRESH),
-            # 새로운 raw evidence가 있으면 항상 최신 구조로 refresh한다 — 오래된 signed URL을
-            # 영구히 유지하는 게 더 안전하다고 가정하지 않는다.
-            if item.media_items:
-                existing.media_items = [m.model_dump() for m in item.media_items]
-
-            # ads.video_url은 영구 캐시가 아니라 Meta의 signed CDN source URL이다. format이
-            # (교정 후 기준으로) VIDEO인 동안은 fresh 수집 때마다 최신 source URL로 갱신한다 —
-            # signed URL은 시간이 지나면 만료될 수 있으므로 "한 번 채워지면 끝"이 아니다. format이
-            # 더 이상 VIDEO가 아니면 이 필드는 대표 영상이 아니므로 건드리지 않고 과거 값을 그대로
-            # 둔다(destructive clear 없음).
-            if existing.format == AdFormat.VIDEO.value and item.video_url:
-                existing.video_url = item.video_url
-
-            new_video_url = existing.video_url
-            video_url_changed = (
-                existing.format == AdFormat.VIDEO.value and bool(new_video_url) and new_video_url != old_video_url
-            )
-
-            if existing.format == AdFormat.VIDEO.value and new_video_url:
-                has_successful_keyframes = existing.keyframe_status == "SUCCESS" and bool(existing.keyframe_urls)
-                if not has_successful_keyframes:
-                    became_video_now = existing.keyframe_status == "NOT_APPLICABLE"
-                    retryable_and_url_changed = (
-                        existing.keyframe_status in ("PENDING", "FAILED") and video_url_changed
-                    )
-                    if became_video_now or retryable_and_url_changed:
-                        # 새로 VIDEO가 됐거나, 아직 성공한 keyframe이 없는데 signed video_url이
-                        # 바뀌었으면(PENDING이 실은 만료된 URL 때문에 실패를 반복 중이었을 수 있음,
-                        # 또는 FAILED였던 것도) PENDING으로 되돌려 최신 URL로 재시도 가능하게 한다.
-                        existing.keyframe_status = "PENDING"
-                        existing.keyframe_retry_count = 0
-                        existing.keyframe_error = None
-                # has_successful_keyframes인 경우 — source URL이 바뀌어도 이미 캐싱된 keyframe은
-                # 삭제/재생성하지 않는다(§ 이미 SUCCESS인 keyframe은 source URL 변경으로 삭제 안 됨).
-            elif was_video and existing.format != AdFormat.VIDEO.value:
-                # VIDEO → CAROUSEL/IMAGE로 교정된 경우 더 이상 keyframe 대상이 아니다. 이미
-                # Storage에 업로드된 keyframe 파일은 destructive cleanup 대상이 아니므로
-                # keyframe_urls 배열 자체는 건드리지 않고 상태만 NOT_APPLICABLE로 되돌린다.
-                existing.keyframe_status = "NOT_APPLICABLE"
+            # ads.video_url은 VIDEO 포맷의 참고용 원본 URL이다(재생하지 않으므로 만료 걱정이
+            # 없다) — format이 (교정 후 기준으로) VIDEO인 동안은 fresh 값이 있으면 최신으로
+            # 갱신한다. format이 더 이상 VIDEO가 아니면 대표 영상이 아니므로 비운다(다만 이번에
+            # 실제로 그 방향으로 교정된 경우에만 — 애매한 상황에서 우연히 지우지 않기 위함).
+            if existing.format == AdFormat.VIDEO.value:
+                if item.video_url:
+                    existing.video_url = item.video_url
+            elif format_changed:
+                existing.video_url = None
 
             # 대표 썸네일(image_url) backfill — 기존에 비어 있었거나, 이번에 format이 실제로
-            # 교정된 경우(예: CAROUSEL→VIDEO)에 채운다. format이 안 바뀌었는데 이미 image_url이
+            # 교정된 경우(예: IMAGE→VIDEO)에 채운다. format이 안 바뀌었는데 이미 image_url이
             # 있으면 무조건 새 이미지로 덮어쓰지는 않는다 — image_url은 signed URL이 아니라 이미
             # 캐싱된 Storage 공개 URL이 대부분이라 계속 유효하다. format이 바뀐 경우는 예전
-            # 대표 이미지가 옛 포맷(예: 캐러셀 카드 이미지) 기준이라 더 이상 유효하지 않을 수 있으므로
+            # 대표 이미지가 옛 포맷 기준이라 더 이상 유효하지 않을 수 있으므로
             # 함께 갱신한다(§DONE CRITERIA — Gallery에 교정된 포맷의 실제 썸네일이 떠야 한다).
             if (format_changed or existing.image_url is None) and item.image_url:
                 existing.image_url = thumbnail_backfill_results.get(ad_archive_id) or item.image_url

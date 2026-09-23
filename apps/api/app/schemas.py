@@ -2,7 +2,7 @@ import uuid
 from datetime import date, datetime
 from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict
 
 
 class AdStatus(str, Enum):
@@ -18,10 +18,13 @@ class VisualType(str, Enum):
     GRAPHIC = "GRAPHIC"
 
 
+# 2026-09-23 재설계 — CAROUSEL을 완전히 제거했다. ADCatcher의 목적은 영상 분석 서비스가 아니라
+# "어떤 광고가 살아있고 어떤 패턴/캠페인으로 운영되는지 빠르게 보는 트래커"이므로, 카드/영상이
+# 섞인 복잡한 원본 구조를 그대로 보존하려다 ffmpeg 파이프라인까지 얹게 된 이전 설계를 되돌린다.
+# 캐러셀은 대표 이미지 1장으로, 명확한 영상 광고만 VIDEO로 취급한다(docs/DATA_SEMANTICS.md §10).
 class AdFormat(str, Enum):
     IMAGE = "IMAGE"
     VIDEO = "VIDEO"
-    CAROUSEL = "CAROUSEL"
 
 
 class ProjectStatus(str, Enum):
@@ -45,14 +48,6 @@ class CampaignClassificationStatus(str, Enum):
     FAILED = "FAILED"
 
 
-# ── VIDEO/CAROUSEL 미디어 메타데이터 (additive, 2026-09) ───────────────────
-
-class MediaItem(BaseModel):
-    type: str  # "image" | "video"
-    url: str
-    preview_url: str | None = None
-
-
 # ── Raw collector output (per-fetch, before DB sync) ──────────────────────
 
 class RawAdItem(BaseModel):
@@ -64,10 +59,9 @@ class RawAdItem(BaseModel):
     image_url: str | None = None
     format: AdFormat
     start_date: datetime | None = None
-    # VIDEO 포맷 전용 대표 영상 URL(HD 우선, SD fallback). CAROUSEL/IMAGE는 NULL — 개별 카드 영상은
-    # media_items에만 담긴다.
+    # VIDEO 포맷 전용 대표 영상 URL(HD 우선, SD fallback). IMAGE는 NULL. 향후 참고용으로만
+    # 저장한다 — UI에서 재생하지 않으므로 keyframe 추출 등 별도 가공은 하지 않는다.
     video_url: str | None = None
-    media_items: list[MediaItem] = []
 
 
 # ── API request/response models ───────────────────────────────────────────
@@ -211,7 +205,11 @@ class AdCampaignTagUpdate(BaseModel):
 
 
 # ── Ad 미디어/캠페인 태그 공용 필드 믹스인 ──────────────────────────────────
-# AdOut/ChangedAdOut가 이 필드셋을 공유한다 (Campaign Tag + VIDEO/CAROUSEL 미디어, 둘 다 additive).
+# AdOut/ChangedAdOut가 이 필드셋을 공유한다 (Campaign Tag + 미디어, 둘 다 additive).
+#
+# 2026-09-23: media_items/keyframe_urls/keyframe_status를 API 응답에서 제거했다(ffmpeg keyframe
+# 파이프라인 폐기 — CAROUSEL 제거와 함께 진행). DB 컬럼 자체는 남아있지만(legacy, 향후 별도
+# migration으로 drop 검토) 서비스/API 어디서도 더 이상 채우거나 읽지 않는다.
 
 class _AdMediaAndCampaignFields(BaseModel):
     campaign_tag_id: uuid.UUID | None = None
@@ -220,17 +218,8 @@ class _AdMediaAndCampaignFields(BaseModel):
     campaign_tag_assignment_source: CampaignTagAssignmentSource | None = None
     campaign_tag_classified_at: datetime | None = None
     campaign_classification_status: CampaignClassificationStatus = CampaignClassificationStatus.PENDING
+    # VIDEO 포맷의 참고용 원본 URL — UI에서 재생하지 않는다(Meta에서 보기 버튼으로 원본 확인).
     video_url: str | None = None
-    media_items: list[MediaItem] = []
-    keyframe_urls: list[str] = []
-    keyframe_status: str = "NOT_APPLICABLE"
-
-    # DB 컬럼은 nullable JSON이라 미설정 행은 NULL(=Python None)이다 — 빈 리스트로 정규화해
-    # 프론트가 항상 배열을 받을 수 있게 한다(null 체크를 프론트 곳곳에 흩뿌리지 않기 위함).
-    @field_validator("media_items", "keyframe_urls", mode="before")
-    @classmethod
-    def _default_empty_list(cls, v: object) -> object:
-        return v or []
 
 
 class AdOut(_AdMediaAndCampaignFields):

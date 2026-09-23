@@ -48,23 +48,6 @@ class Settings(BaseSettings):
     # 대시보드 "분석 업데이트"(Gemini Vision, visual_type) 버튼용 — 위와 동일한 원칙.
     visual_analysis_manual_batch_size: int = 10
 
-    # ── VIDEO Keyframe 캐싱 (2026-09, 2026-09-22 개정) ───────────────────
-    # 신규 수집 동기 경로에서는 절대 실행하지 않는다 — 별도 pending 배치(process_pending_video_keyframes)
-    # 에서만 실행해 Core Collection 응답 시간에 영향을 주지 않는다.
-    ffmpeg_path: str = "ffmpeg"
-    video_keyframe_count: int = 4
-    video_keyframe_max_download_seconds: int = 30
-    video_keyframe_pending_batch_size: int = 20
-    video_keyframe_max_retries: int = 3
-    # 다운로드는 stream으로 tempfile에 바로 쓰되, 비정상적으로 큰 영상이 worker memory/disk를
-    # 잡아먹지 않도록 상한을 둔다(초과 시 즉시 중단하고 실패로 취급 — 무한정 받지 않는다).
-    video_keyframe_max_download_bytes: int = 200 * 1024 * 1024  # 200MB
-    # HTTP 429/5xx 같은 일시 오류에 대한 짧은 bounded retry 횟수(무한 재시도 금지).
-    video_keyframe_download_retries: int = 2
-    # keyframe 이미지는 원본 해상도로 저장하지 않는다 — aspect ratio 유지, upscale 없이 이 너비로
-    # 제한한다(Storage 용량 절감).
-    video_keyframe_max_width: int = 720
-
     # last_accessed_at 갱신은 요청마다 DB write를 하지 않고 이 초(秒) 단위로만 반영한다(성능 최적화).
     # 14일 자동 정지 판정은 일 단위 스케줄러에서만 평가되므로 이 정도 지연은 정책 의미에 영향 없다.
     last_accessed_touch_throttle_seconds: int = 300

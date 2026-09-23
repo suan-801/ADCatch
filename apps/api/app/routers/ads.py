@@ -133,7 +133,7 @@ def list_project_ads(
     project_id: uuid.UUID,
     competitor_id: uuid.UUID | None = Query(None),
     status: str | None = Query(None, description="NEW | ACTIVE | INACTIVE"),
-    format: str | None = Query(None, description="IMAGE | VIDEO | CAROUSEL"),
+    format: str | None = Query(None, description="IMAGE | VIDEO"),
     visual_type: str | None = Query(None, description="PERSON | PRODUCT | TEXT_HEAVY | GRAPHIC | UNANALYZED"),
     campaign_tag_id: str | None = Query(
         None, description="태그 UUID, 또는 미분류(태그 없음) 필터용 특수값 NEEDS_REVIEW"

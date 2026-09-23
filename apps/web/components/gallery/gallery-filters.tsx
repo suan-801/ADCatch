@@ -80,7 +80,6 @@ const FORMAT_LABEL: Record<FormatFilterValue, string> = {
   ALL: "전체",
   IMAGE: "이미지",
   VIDEO: "영상",
-  CAROUSEL: "캐러셀",
 };
 
 const VISUAL_LABEL: Record<VisualFilterValue, string> = {

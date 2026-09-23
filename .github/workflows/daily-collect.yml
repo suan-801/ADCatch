@@ -6,12 +6,6 @@ on:
     - cron: "0 21 * * *"
   workflow_dispatch: {}
 
-# process-video-keyframes.yml(수동 keyframe 재처리)와 동시 실행을 막는다 — 이 workflow도 매
-# 회차 마지막에 process_pending_video_keyframes를 실행하므로, 스케줄 실행과 수동 실행이 겹치면
-# 같은 keyframe_status=PENDING 소재를 동시에 처리해 Storage에 중복 업로드가 발생할 수 있다.
-concurrency:
-  group: video-keyframes-and-collection
-
 jobs:
   collect:
     runs-on: ubuntu-latest
@@ -21,18 +15,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
-      # VIDEO keyframe pending batch(app/services/pending_video_keyframes.py)가 ffmpeg/ffprobe를
-      # shutil.which()로 찾는다 — ubuntu-latest runner에 우연히 설치돼 있다는 가정에 의존하지
-      # 않고 명시적으로 설치한다. 없으면 keyframe 추출은 즉시 FAILED로 처리되고(무한 재시도 방지),
-      # 기존 preview 썸네일로는 정상 폴백되므로 Core Collection 자체는 영향받지 않는다.
-      - name: Install ffmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg
-
-      - name: Verify ffmpeg/ffprobe
-        run: |
-          ffmpeg -version
-          ffprobe -version
 
       - name: Install dependencies
         working-directory: apps/api

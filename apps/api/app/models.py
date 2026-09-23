@@ -74,7 +74,7 @@ class Ad(Base):
     source_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="NEW")  # NEW | ACTIVE | INACTIVE
     visual_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
-    format: Mapped[str | None] = mapped_column(String(20), nullable=True)  # IMAGE | VIDEO | CAROUSEL
+    format: Mapped[str | None] = mapped_column(String(20), nullable=True)  # IMAGE | VIDEO (2026-09-23: CAROUSEL 제거)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     copy_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     cta_text: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -105,13 +105,17 @@ class Ad(Base):
     campaign_classification_retry_count: Mapped[int] = mapped_column(Integer, default=0)
     campaign_classification_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # ── VIDEO/CAROUSEL 미디어 메타데이터 (additive, 2026-09) ─────────────
-    # image_url은 기존과 동일하게 "대표 썸네일 1장"으로 계속 쓰인다. video_url/media_items는
-    # 원본 구조를 추가로 보존해 VIDEO 상세(keyframe)/CAROUSEL 상세(카드 구성) UI에 쓴다.
+    # ── VIDEO 미디어 메타데이터 (additive, 2026-09) ──────────────────────
+    # image_url은 기존과 동일하게 "대표 썸네일 1장"으로 계속 쓰인다. video_url은 VIDEO 포맷의
+    # 참고용 원본 URL(재생하지 않음).
     video_url: Mapped[str | None] = mapped_column(Text, nullable=True)  # VIDEO 포맷 전용, HD 우선
-    media_items: Mapped[list | None] = mapped_column(JSON, nullable=True)  # [{type, url, preview_url}]
-    keyframe_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)  # 캐싱된 keyframe URL 최대 4개
-    # NOT_APPLICABLE(비-VIDEO) | PENDING | SUCCESS | FAILED
+
+    # 2026-09-23: ffmpeg keyframe 파이프라인 + CAROUSEL 제거와 함께 아래 필드들은 API/서비스에서
+    # 더 이상 채우거나 읽지 않는 legacy 컬럼이다. 운영 안정화 후 별도 migration으로 drop을
+    # 검토한다(db/migrations/003_simplify_media_format.sql 참고) — 이번 라운드에서는 DB 컬럼을
+    # 지우지 않는다(마이그레이션 리스크 최소화).
+    media_items: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    keyframe_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)
     keyframe_status: Mapped[str] = mapped_column(String(20), default="NOT_APPLICABLE")
     keyframe_retry_count: Mapped[int] = mapped_column(Integer, default=0)
     keyframe_error: Mapped[str | None] = mapped_column(Text, nullable=True)

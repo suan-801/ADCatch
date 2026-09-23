@@ -1,5 +1,9 @@
-"""기존(이 컬럼들이 생기기 전에 수집된) VIDEO 소재가 재발견될 때 video_url/media_items/
-keyframe_status가 자연스럽게 채워지는지 — 별도 백필 스크립트 없이 다음 수집 사이클에서 처리된다."""
+"""기존(재발견된) 소재의 format/video_url/image_url 갱신 — 2026-09-23 단순화.
+
+ffmpeg keyframe 파이프라인과 CAROUSEL을 제거하면서 ad_sync.py의 재발견 분기도 함께 단순화했다:
+format이 실제로 바뀌면 최신 판정을 반영하고, video_url은 format이 VIDEO인 동안 최신 값으로
+갱신하며(재생하지 않으므로 만료 걱정이 없다), image_url은 비어있거나 format이 교정될 때만
+backfill한다. keyframe_* 컬럼은 더 이상 이 로직에서 참조하지 않는다(legacy)."""
 
 from datetime import date
 
@@ -14,7 +18,7 @@ def _run(db, competitor, run_date: date):
 
 
 def test_existing_video_ad_backfills_video_url_on_rediscovery(db, competitor):
-    # 과거(이 필드가 생기기 전) 수집된 것처럼, video_url/media_items 없이 VIDEO ad를 직접 만든다.
+    # 과거(이 필드가 생기기 전) 수집된 것처럼, video_url 없이 VIDEO ad를 직접 만든다.
     ad = Ad(
         competitor_id=competitor.id,
         ad_archive_id="A1",
@@ -22,8 +26,6 @@ def test_existing_video_ad_backfills_video_url_on_rediscovery(db, competitor):
         image_url="https://cdn/preview.jpg",
         status="ACTIVE",
         video_url=None,
-        media_items=None,
-        keyframe_status="NOT_APPLICABLE",
     )
     db.add(ad)
     db.commit()
@@ -36,16 +38,12 @@ def test_existing_video_ad_backfills_video_url_on_rediscovery(db, competitor):
 
     db.refresh(ad)
     assert ad.video_url == "https://cdn/a1.mp4"
-    assert ad.keyframe_status == "PENDING"  # 이제 pending 배치 대상이 됨
 
 
-# ── 2026-09-22 개정: ads.video_url은 영구 캐시가 아니라 Meta signed CDN source URL이다 ─────────
-# 예전 규칙("한 번 채워지면 절대 덮어쓰지 않는다")은 signed URL이 만료되는 실제 운영 상황을
-# 반영하지 못했다 — fresh 수집 때마다 최신 source URL로 refresh하되, 이미 성공적으로 캐싱된
-# keyframe만큼은 source URL이 바뀌어도 삭제/재생성하지 않는다.
+# ── ads.video_url은 영구 캐시가 아니라 참고용 원본 URL이다 — fresh 수집 때마다 최신값으로 갱신 ──
 
 
-def test_video_url_refreshes_to_latest_source_but_keeps_successful_keyframes(db, competitor):
+def test_video_url_refreshes_to_latest_source_on_every_fresh_collection(db, competitor):
     ad = Ad(
         competitor_id=competitor.id,
         ad_archive_id="A1",
@@ -53,8 +51,6 @@ def test_video_url_refreshes_to_latest_source_but_keeps_successful_keyframes(db,
         image_url="https://cdn/preview.jpg",
         status="ACTIVE",
         video_url="https://cdn/already-cached.mp4",
-        keyframe_status="SUCCESS",
-        keyframe_urls=["https://cdn/kf1.jpg"],
     )
     db.add(ad)
     db.commit()
@@ -66,10 +62,7 @@ def test_video_url_refreshes_to_latest_source_but_keeps_successful_keyframes(db,
     synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
 
     db.refresh(ad)
-    assert ad.video_url == "https://cdn/different-url.mp4"  # signed URL은 최신 값으로 refresh됨
-    assert ad.keyframe_status == "SUCCESS"  # 이미 성공한 keyframe은 source URL 변경으로 건드리지 않음
-    assert ad.keyframe_retry_count == 0
-    assert ad.keyframe_urls == ["https://cdn/kf1.jpg"]  # 삭제/재생성 없음
+    assert ad.video_url == "https://cdn/different-url.mp4"
 
 
 def test_video_url_unchanged_when_fresh_item_has_no_video_url(db, competitor):
@@ -77,7 +70,7 @@ def test_video_url_unchanged_when_fresh_item_has_no_video_url(db, competitor):
     ad = Ad(
         competitor_id=competitor.id, ad_archive_id="A1", format="VIDEO",
         image_url="https://cdn/preview.jpg", status="ACTIVE",
-        video_url="https://cdn/existing.mp4", keyframe_status="SUCCESS", keyframe_urls=["https://cdn/kf1.jpg"],
+        video_url="https://cdn/existing.mp4",
     )
     db.add(ad)
     db.commit()
@@ -89,71 +82,24 @@ def test_video_url_unchanged_when_fresh_item_has_no_video_url(db, competitor):
     assert ad.video_url == "https://cdn/existing.mp4"
 
 
-def test_failed_keyframe_reactivates_when_fresh_video_url_differs(db, competitor):
-    """FAILED로 확정된 keyframe도, signed video_url이 최신 수집에서 실제로 달라졌으면(만료된 URL
-    때문에 실패를 반복했을 수 있음) PENDING으로 되돌려 재시도 가능하게 만든다."""
+def test_video_corrected_to_image_clears_video_url(db, competitor):
+    """VIDEO → IMAGE로 실제 교정되면 더 이상 대표 영상이 아니므로 video_url을 비운다."""
     ad = Ad(
         competitor_id=competitor.id, ad_archive_id="A1", format="VIDEO",
-        image_url="https://cdn/preview.jpg", status="ACTIVE",
-        video_url="https://cdn/old-expired.mp4", keyframe_status="FAILED", keyframe_retry_count=3,
-        keyframe_error="영상 다운로드 실패",
+        image_url="https://cdn/poster.jpg", status="ACTIVE", video_url="https://cdn/old.mp4",
     )
     db.add(ad)
     db.commit()
 
     item = RawAdItem(
-        ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.VIDEO,
-        image_url="https://cdn/preview.jpg", video_url="https://cdn/fresh.mp4",
+        ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.IMAGE,
+        image_url="https://cdn/card1.jpg",
     )
     synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
 
     db.refresh(ad)
-    assert ad.video_url == "https://cdn/fresh.mp4"
-    assert ad.keyframe_status == "PENDING"
-    assert ad.keyframe_retry_count == 0
-    assert ad.keyframe_error is None
-
-
-def test_failed_keyframe_not_reset_when_video_url_unchanged(db, competitor):
-    """video_url이 실제로 바뀌지 않았으면 FAILED는 그대로 유지한다(불필요한 재시도 남발 방지)."""
-    ad = Ad(
-        competitor_id=competitor.id, ad_archive_id="A1", format="VIDEO",
-        image_url="https://cdn/preview.jpg", status="ACTIVE",
-        video_url="https://cdn/same.mp4", keyframe_status="FAILED", keyframe_retry_count=3,
-        keyframe_error="영상 다운로드 실패",
-    )
-    db.add(ad)
-    db.commit()
-
-    item = RawAdItem(
-        ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.VIDEO,
-        image_url="https://cdn/preview.jpg", video_url="https://cdn/same.mp4",
-    )
-    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
-
-    db.refresh(ad)
-    assert ad.keyframe_status == "FAILED"
-    assert ad.keyframe_retry_count == 3
-
-
-def test_pending_keyframe_url_change_resets_retry_count(db, competitor):
-    ad = Ad(
-        competitor_id=competitor.id, ad_archive_id="A1", format="VIDEO",
-        image_url="https://cdn/preview.jpg", status="ACTIVE",
-        video_url="https://cdn/old.mp4", keyframe_status="PENDING", keyframe_retry_count=2,
-    )
-    db.add(ad)
-    db.commit()
-
-    item = RawAdItem(
-        ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.VIDEO,
-        image_url="https://cdn/preview.jpg", video_url="https://cdn/fresh.mp4",
-    )
-    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
-
-    db.refresh(ad)
-    assert ad.keyframe_status == "PENDING"
-    assert ad.keyframe_retry_count == 0
+    assert ad.format == "IMAGE"
+    assert ad.video_url is None
 
 
 # ── image_url backfill (cache-only, Gemini 없음) ────────────────────────────────────
@@ -189,9 +135,9 @@ def test_missing_image_url_backfilled_via_cache_only_thumbnail(db, competitor, m
 
 def test_missing_image_url_falls_back_to_raw_url_when_tag_visual_false(db, competitor, monkeypatch):
     """tag_visual=False(기존 다수 테스트가 쓰는 값)면 캐싱 스레드풀 자체가 돌지 않아 네트워크
-    호출은 없다 — 다만 video_url/media_items가 이미 tag_visual과 무관하게 backfill되는 것과
-    동일한 원칙으로, image_url도 raw item 값 그대로는 채워진다(캐싱된 Storage URL이 아니라 원본
-    Meta CDN URL이라는 차이만 있음)."""
+    호출은 없다 — 다만 video_url이 이미 tag_visual과 무관하게 backfill되는 것과 동일한 원칙으로,
+    image_url도 raw item 값 그대로는 채워진다(캐싱된 Storage URL이 아니라 원본 Meta CDN URL이라는
+    차이만 있음)."""
     from app.services import ad_sync
 
     ad = Ad(competitor_id=competitor.id, ad_archive_id="A1", format="IMAGE", image_url=None, status="ACTIVE")
@@ -209,12 +155,93 @@ def test_missing_image_url_falls_back_to_raw_url_when_tag_visual_false(db, compe
     assert ad.image_url == "https://cdn/fresh.jpg"  # 그래도 raw URL로는 backfill됨
 
 
-# ── 재현 사례 end-to-end: ad_archive_id=1411948807546506류 광고의 CAROUSEL→VIDEO 자동 교정 ──────
+def test_existing_image_url_never_overwritten_by_backfill(db, competitor, monkeypatch):
+    from app.services import ad_sync
+
+    ad = Ad(competitor_id=competitor.id, ad_archive_id="A1", format="IMAGE", image_url="https://cdn/already-set.jpg", status="ACTIVE")
+    db.add(ad)
+    db.commit()
+
+    monkeypatch.setattr(ad_sync.media, "cache_thumbnail_only", lambda *a, **k: "https://storage.example.com/should-not-be-used.jpg")
+
+    item = RawAdItem(ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.IMAGE, image_url="https://cdn/fresh.jpg")
+    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=True)
+
+    db.refresh(ad)
+    assert ad.image_url == "https://cdn/already-set.jpg"
+
+
+def test_new_video_ad_stores_video_url(db, competitor):
+    item = RawAdItem(
+        ad_archive_id="V1", page_id="1", page_name="p", format=AdFormat.VIDEO,
+        image_url="https://cdn/preview.jpg", video_url="https://cdn/v1.mp4",
+    )
+    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
+
+    ad = db.query(Ad).filter_by(ad_archive_id="V1").one()
+    assert ad.format == "VIDEO"
+    assert ad.video_url == "https://cdn/v1.mp4"
+
+
+def test_new_image_ad_has_no_video_url(db, competitor):
+    item = RawAdItem(ad_archive_id="I1", page_id="1", page_name="p", format=AdFormat.IMAGE, image_url="https://cdn/i1.jpg")
+    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
+
+    ad = db.query(Ad).filter_by(ad_archive_id="I1").one()
+    assert ad.format == "IMAGE"
+    assert ad.video_url is None
+
+
+# ── format 교정 — 과거에 잘못 판정된 format을 최신 raw 판정으로 바로잡는다 ──────────────────
+
+
+def test_existing_image_corrected_to_video_when_raw_evidence_is_clear(db, competitor):
+    """예전(3-way 시절) CAROUSEL로 저장됐던 광고는 이번 마이그레이션으로 이미 IMAGE로 내려가
+    있다 — 다음 재수집에서 명확한 VIDEO 증거가 있으면 VIDEO로 교정되는지 확인한다."""
+    ad = Ad(
+        competitor_id=competitor.id, ad_archive_id="A1", format="IMAGE",
+        image_url="https://cdn/old-poster.jpg", status="ACTIVE", video_url=None,
+    )
+    db.add(ad)
+    db.commit()
+
+    item = RawAdItem(
+        ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.VIDEO,
+        image_url="https://cdn/new-poster.jpg", video_url="https://cdn/new.mp4",
+    )
+    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
+
+    db.refresh(ad)
+    assert ad.format == "VIDEO"
+    assert ad.video_url == "https://cdn/new.mp4"
+
+
+def test_format_not_overwritten_when_raw_evidence_is_empty(db, competitor):
+    """raw media 정보가 비어 있거나 불확실한 경우(예: 일시적으로 빈 snapshot) 기존 format을
+    임의로 덮어쓰지 않는다."""
+    ad = Ad(
+        competitor_id=competitor.id, ad_archive_id="A1", format="VIDEO",
+        image_url="https://cdn/poster.jpg", status="ACTIVE", video_url="https://cdn/existing.mp4",
+    )
+    db.add(ad)
+    db.commit()
+
+    # snapshot이 비어 사실상 아무 media evidence도 없는 raw item(=classify_and_extract_media가
+    # AdFormat.IMAGE, None, None을 반환하는 경우와 동일한 모양).
+    item = RawAdItem(ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.IMAGE, image_url=None)
+    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
+
+    db.refresh(ad)
+    assert ad.format == "VIDEO"  # 덮어쓰이지 않음
+    assert ad.video_url == "https://cdn/existing.mp4"
+
+
+# ── 재현 사례 end-to-end: ad_archive_id=1411948807546506류 광고의 IMAGE→VIDEO 자동 교정 ──────
 # 실제 signed URL은 쓰지 않고 가짜 cdn URL만 사용한다.
 
 
-def test_reproduction_case_carousel_ad_corrected_to_video_end_to_end(db, competitor):
-    """기존 규칙("cards 2개 이상이면 무조건 CAROUSEL")으로 CAROUSEL 저장된 광고가, 다음
+def test_reproduction_case_ad_corrected_to_video_end_to_end(db, competitor):
+    """예전 3-way 분류 시절 CAROUSEL(현재는 마이그레이션으로 IMAGE)로 저장됐던 광고가, 다음
     수집에서 raw item에 display_format=VIDEO + 유효한 카드 video URL이 있으면(=1411948807546506류
     구조) VIDEO로 자동 교정되고 대표 썸네일도 채워지는지 parse_items()부터 synchronize_ad_status()
     까지 전체 경로로 검증한다."""
@@ -223,12 +250,10 @@ def test_reproduction_case_carousel_ad_corrected_to_video_end_to_end(db, competi
     ad = Ad(
         competitor_id=competitor.id,
         ad_archive_id="1411948807546506",
-        format="CAROUSEL",
+        format="IMAGE",
         image_url="https://cdn.example.com/old-carousel-thumb.jpg",
         status="ACTIVE",
         video_url=None,
-        media_items=[{"type": "image", "url": "https://cdn.example.com/old-carousel-thumb.jpg"}],
-        keyframe_status="NOT_APPLICABLE",
     )
     db.add(ad)
     db.commit()
@@ -258,161 +283,3 @@ def test_reproduction_case_carousel_ad_corrected_to_video_end_to_end(db, competi
     assert ad.format == "VIDEO"
     assert ad.video_url == "https://cdn.example.com/1411948807546506_hd.mp4"
     assert ad.image_url == "https://cdn.example.com/1411948807546506_poster.jpg"
-    assert ad.keyframe_status == "PENDING"  # keyframe pending batch 대상에 새로 들어감
-    assert ad.keyframe_retry_count == 0
-
-
-def test_existing_image_url_never_overwritten_by_backfill(db, competitor, monkeypatch):
-    from app.services import ad_sync
-
-    ad = Ad(competitor_id=competitor.id, ad_archive_id="A1", format="IMAGE", image_url="https://cdn/already-set.jpg", status="ACTIVE")
-    db.add(ad)
-    db.commit()
-
-    monkeypatch.setattr(ad_sync.media, "cache_thumbnail_only", lambda *a, **k: "https://storage.example.com/should-not-be-used.jpg")
-
-    item = RawAdItem(ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.IMAGE, image_url="https://cdn/fresh.jpg")
-    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=True)
-
-    db.refresh(ad)
-    assert ad.image_url == "https://cdn/already-set.jpg"
-
-
-def test_image_format_ad_never_gets_keyframe_pending(db, competitor):
-    ad = Ad(
-        competitor_id=competitor.id, ad_archive_id="A1", format="IMAGE",
-        image_url="https://cdn/i1.jpg", status="ACTIVE", keyframe_status="NOT_APPLICABLE",
-    )
-    db.add(ad)
-    db.commit()
-
-    item = RawAdItem(ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.IMAGE, image_url="https://cdn/i1.jpg")
-    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
-
-    db.refresh(ad)
-    assert ad.keyframe_status == "NOT_APPLICABLE"
-
-
-def test_new_video_ad_starts_keyframe_pending_immediately(db, competitor):
-    """신규 VIDEO 소재는 생성 시점부터 keyframe_status=PENDING으로 시작한다 — Core Collection
-    안에서 ffmpeg를 호출하지 않고 pending 배치가 나중에 처리한다."""
-    item = RawAdItem(
-        ad_archive_id="V1", page_id="1", page_name="p", format=AdFormat.VIDEO,
-        image_url="https://cdn/preview.jpg", video_url="https://cdn/v1.mp4",
-    )
-    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
-
-    ad = db.query(Ad).filter_by(ad_archive_id="V1").one()
-    assert ad.video_url == "https://cdn/v1.mp4"
-    assert ad.keyframe_status == "PENDING"
-
-
-def test_new_image_ad_keyframe_status_is_not_applicable(db, competitor):
-    item = RawAdItem(ad_archive_id="I1", page_id="1", page_name="p", format=AdFormat.IMAGE, image_url="https://cdn/i1.jpg")
-    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
-
-    ad = db.query(Ad).filter_by(ad_archive_id="I1").one()
-    assert ad.keyframe_status == "NOT_APPLICABLE"
-
-
-# ── 2026-09 사용자 피드백: 기존 잘못 저장된 format 교정 ──────────────────────────
-# 과거엔 video_url/media_items만 backfill하고 existing.format은 절대 교정하지 않았다 — 그 결과
-# 과거 CAROUSEL로 저장된 광고가 새 parser에서 VIDEO로 올바르게 재판정돼도 DB에는 계속 CAROUSEL로
-# 남아 keyframe pending batch 대상에서 영구히 제외되는 실제 결손이 있었다.
-
-
-def test_existing_carousel_corrected_to_video_when_raw_evidence_is_clear(db, competitor):
-    ad = Ad(
-        competitor_id=competitor.id, ad_archive_id="A1", format="CAROUSEL",
-        image_url="https://cdn/old-poster.jpg", status="ACTIVE",
-        video_url=None, media_items=[{"type": "image", "url": "https://cdn/old-poster.jpg"}],
-        keyframe_status="NOT_APPLICABLE",
-    )
-    db.add(ad)
-    db.commit()
-
-    item = RawAdItem(
-        ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.VIDEO,
-        image_url="https://cdn/new-poster.jpg", video_url="https://cdn/new.mp4",
-    )
-    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
-
-    db.refresh(ad)
-    assert ad.format == "VIDEO"
-    assert ad.video_url == "https://cdn/new.mp4"
-    assert ad.keyframe_status == "PENDING"  # keyframe batch 대상에 새로 들어감
-    assert ad.keyframe_retry_count == 0
-
-
-def test_format_correction_does_not_reset_already_successful_keyframes(db, competitor):
-    """이미 SUCCESS인 keyframe은 format이 재확인(VIDEO→VIDEO)돼도 불필요하게 초기화되지 않는다."""
-    ad = Ad(
-        competitor_id=competitor.id, ad_archive_id="A1", format="VIDEO",
-        image_url="https://cdn/poster.jpg", status="ACTIVE",
-        video_url="https://cdn/existing.mp4", keyframe_status="SUCCESS",
-        keyframe_urls=["https://cdn/kf1.jpg", "https://cdn/kf2.jpg"],
-    )
-    db.add(ad)
-    db.commit()
-
-    item = RawAdItem(
-        ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.VIDEO,
-        image_url="https://cdn/poster.jpg", video_url="https://cdn/existing.mp4",
-    )
-    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
-
-    db.refresh(ad)
-    assert ad.keyframe_status == "SUCCESS"
-    assert ad.keyframe_urls == ["https://cdn/kf1.jpg", "https://cdn/kf2.jpg"]
-
-
-def test_existing_video_corrected_to_carousel_does_not_delete_keyframe_urls(db, competitor):
-    """VIDEO → CAROUSEL 교정도 fresh evidence가 명확하면 처리하되, 이미 업로드된 keyframe 파일에
-    대한 destructive storage cleanup은 하지 않는다(keyframe_urls 배열 자체는 보존, 상태만
-    NOT_APPLICABLE로 되돌림)."""
-    ad = Ad(
-        competitor_id=competitor.id, ad_archive_id="A1", format="VIDEO",
-        image_url="https://cdn/poster.jpg", status="ACTIVE",
-        video_url="https://cdn/old.mp4", keyframe_status="SUCCESS",
-        keyframe_urls=["https://cdn/kf1.jpg"],
-    )
-    db.add(ad)
-    db.commit()
-
-    item = RawAdItem(
-        ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.CAROUSEL,
-        image_url="https://cdn/card1.jpg",
-        media_items=[
-            {"type": "image", "url": "https://cdn/card1.jpg"},
-            {"type": "image", "url": "https://cdn/card2.jpg"},
-        ],
-    )
-    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
-
-    db.refresh(ad)
-    assert ad.format == "CAROUSEL"
-    assert ad.keyframe_status == "NOT_APPLICABLE"
-    assert ad.keyframe_urls == ["https://cdn/kf1.jpg"]  # destructive cleanup 없음 — 배열 보존
-
-
-def test_format_not_overwritten_when_raw_evidence_is_empty(db, competitor):
-    """raw media 정보가 비어 있거나 불확실한 경우(예: 일시적으로 빈 snapshot) 기존 format을
-    임의로 덮어쓰지 않는다."""
-    ad = Ad(
-        competitor_id=competitor.id, ad_archive_id="A1", format="VIDEO",
-        image_url="https://cdn/poster.jpg", status="ACTIVE",
-        video_url="https://cdn/existing.mp4", keyframe_status="SUCCESS",
-        keyframe_urls=["https://cdn/kf1.jpg"],
-    )
-    db.add(ad)
-    db.commit()
-
-    # snapshot이 비어 사실상 아무 media evidence도 없는 raw item(=classify_and_extract_media가
-    # AdFormat.IMAGE, None, None, []을 반환하는 경우와 동일한 모양).
-    item = RawAdItem(ad_archive_id="A1", page_id="1", page_name="p", format=AdFormat.IMAGE, image_url=None)
-    synchronize_ad_status(db, competitor.id, [item], _run(db, competitor, date(2026, 9, 1)), tag_visual=False)
-
-    db.refresh(ad)
-    assert ad.format == "VIDEO"  # 덮어쓰이지 않음
-    assert ad.video_url == "https://cdn/existing.mp4"
-    assert ad.keyframe_status == "SUCCESS"
