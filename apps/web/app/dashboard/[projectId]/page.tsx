@@ -249,19 +249,24 @@ export default function CurrentDashboardPage() {
           </div>
 
           {/* §2/§3 — 비주얼 패턴은 STARTED/REACTIVATED 이벤트가 아니라 "선택 기간에 실제로
-              라이브였던 광고"(AdObservation 기준) 전체를 분모로 삼는다(docs/DATA_SEMANTICS.md §11). */}
-          {range && <VisualPatternPanel projectId={projectId} range={range} onProcessed={refreshRange} />}
+              라이브였던 광고"(AdObservation 기준) 전체를 분모로 삼는다(docs/DATA_SEMANTICS.md §11).
+              §4/§5 — 캠페인 패턴도 동일한 alive_ad_count 분모를 공유하므로 비주얼 패턴 옆에
+              나란히 둔다(절대 기준이 갈라지지 않게 한다). alive_ad_count>0이면 항상 무언가
+              (태그/검토 필요/미분류)로 분류되므로, campaign_mix 존재 여부가 아니라
+              alive_ad_count로 렌더링 여부를 결정한다. */}
+          {range && (
+            <div className="flex flex-wrap items-start gap-6">
+              <VisualPatternPanel projectId={projectId} range={range} onProcessed={refreshRange} />
+              {range.alive_ad_count > 0 && (
+                <section className="max-w-sm space-y-1.5">
+                  <CampaignMixChart mix={range.campaign_mix} campaignTags={campaignTags} />
+                  <p className="text-xs text-muted">태그 수정은 관리자에 문의해주세요.</p>
+                </section>
+              )}
+            </div>
+          )}
 
           {range && <PeriodChangesPanel projectId={projectId} range={range} competitorLabel={competitorLabel} />}
-
-          {/* §4/§5 — 캠페인 패턴도 비주얼 패턴과 동일한 alive_ad_count 분모를 공유한다(절대 기준이
-              갈라지지 않게 한다). alive_ad_count>0이면 항상 무언가(태그/검토 필요/미분류)로
-              분류되므로, campaign_mix 존재 여부가 아니라 alive_ad_count로 렌더링 여부를 결정한다. */}
-          {range && range.alive_ad_count > 0 && (
-            <section className="max-w-sm">
-              <CampaignMixChart mix={range.campaign_mix} campaignTags={campaignTags} />
-            </section>
-          )}
 
           <section>
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
